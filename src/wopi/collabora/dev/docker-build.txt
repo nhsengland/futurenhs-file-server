@@ -1,0 +1,11 @@
+docker login
+
+docker build -t fnhs-wopi-client:dev-1.0.0 .
+
+docker tag fnhs-wopi-client:dev-1.0.0 fnhs-wopi-client:dev-latest
+docker tag fnhs-wopi-client:dev-1.0.0 fnhs-wopi-client:latest
+
+docker tag fnhs-wopi-client:dev-1.0.0 richardcds/fnhs-wopi-client:dev-latest
+docker tag fnhs-wopi-client:dev-1.0.0 richardcds/fnhs-wopi-client:dev-1.0.0
+
+docker push -a richardcds/fnhs-wopi-client
