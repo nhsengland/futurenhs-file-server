@@ -29,7 +29,7 @@ namespace FutureNHS.WOPIHost
             if (string.IsNullOrWhiteSpace(contentHash)) throw new ArgumentNullException(nameof(contentHash));
 
             if (2 > extension.Length)                   throw new ArgumentOutOfRangeException(nameof(extension), "The file extension needs to be at least 2 characters long (including the period character)");
-            if (!extension.StartsWith('.'))             throw new ArgumentOutOfRangeException(nameof(extension), "The file extension needs to start with a period character");
+            if (!extension.StartsWith('.'))       throw new ArgumentOutOfRangeException(nameof(extension), "The file extension needs to start with a period character");
             if (0 >= sizeInBytes)                       throw new ArgumentOutOfRangeException(nameof(sizeInBytes), "The file size needs to be greater than 0 bytes");
 
             // TODO - Might make sense to check the last write time isn't some crazy past of future date (clock skew)?

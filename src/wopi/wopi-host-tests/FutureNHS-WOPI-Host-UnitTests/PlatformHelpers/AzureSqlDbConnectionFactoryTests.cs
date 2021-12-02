@@ -1,10 +1,7 @@
-﻿using FutureNHS.WOPIHost.PlatformHelpers;
-using Microsoft.Extensions.Configuration;
+﻿using FutureNHS.WOPIHost.Azure;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
-using System.Data.SqlClient;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -57,37 +54,6 @@ namespace FutureNHS_WOPI_Host_UnitTests.PlatformHelpers
             _ = await azureSqlDbConnectionFactory.GetReadOnlyConnectionAsync(cancellationToken);
         }
 
-#if DEBUG
-        [TestMethod]
-        public async Task GetReadOnlyConnectionAsync_ReturnsClosedConnection()
-        {
-            var cancellationToken = CancellationToken.None;
-
-            var logger = new Moq.Mock<ILogger<AzureSqlDbConnectionFactory>>().Object;
-
-            var configurationBuilder = new ConfigurationBuilder();
-
-            configurationBuilder.AddUserSecrets(Assembly.GetExecutingAssembly());
-
-            var configuration = configurationBuilder.Build();
-
-            var readWriteConnectionString = configuration.GetValue<string>("AzurePlatform:AzureSql:ReadWriteConnectionString");
-            var readOnlyConnectionString = configuration.GetValue<string>("AzurePlatform:AzureSql:ReadOnlyConnectionString");
-
-            IAzureSqlDbConnectionFactory azureSqlDbConnectionFactory = new AzureSqlDbConnectionFactory(readOnlyConnectionString, readWriteConnectionString, logger);
-
-            using var connection = await azureSqlDbConnectionFactory.GetReadOnlyConnectionAsync(cancellationToken);
-
-            Assert.IsNotNull(connection);
-            Assert.IsInstanceOfType(connection, typeof(SqlConnection));
-
-            //Assert.AreEqual(readOnlyConnectionString, connection.ConnectionString); // Can't test this as it rewrites the connection string (application intent is lost)
-            Assert.AreEqual(System.Data.ConnectionState.Closed, connection.State);
-        }
-#endif
-
-
-
         [TestMethod]
         [ExpectedException(typeof(ArgumentException))]
         public async Task GetReadWriteConnectionAsync_ThrowsIfInvalidStructureForConnectionString()
@@ -131,34 +97,5 @@ namespace FutureNHS_WOPI_Host_UnitTests.PlatformHelpers
 
             _ = await azureSqlDbConnectionFactory.GetReadWriteConnectionAsync(cancellationToken);
         }
-
-#if DEBUG
-        [TestMethod]
-        public async Task GetReadWriteConnectionAsync_ReturnsClosedConnection()
-        {
-            var cancellationToken = CancellationToken.None;
-
-            var logger = new Moq.Mock<ILogger<AzureSqlDbConnectionFactory>>().Object;
-
-            var configurationBuilder = new ConfigurationBuilder();
-
-            configurationBuilder.AddUserSecrets(Assembly.GetExecutingAssembly());
-
-            var configuration = configurationBuilder.Build();
-
-            var readWriteConnectionString = configuration.GetValue<string>("AzurePlatform:AzureSql:ReadWriteConnectionString");
-            var readOnlyConnectionString = configuration.GetValue<string>("AzurePlatform:AzureSql:ReadOnlyConnectionString");
-
-            IAzureSqlDbConnectionFactory azureSqlDbConnectionFactory = new AzureSqlDbConnectionFactory(readOnlyConnectionString, readWriteConnectionString, logger);
-
-            using var connection = await azureSqlDbConnectionFactory.GetReadWriteConnectionAsync(cancellationToken);
-
-            Assert.IsNotNull(connection);
-            Assert.IsInstanceOfType(connection, typeof(SqlConnection));
-
-            //Assert.AreEqual(readWriteConnectionString, connection.ConnectionString); // Can't test this as it rewrites the connection string (application intent is lost)
-            Assert.AreEqual(System.Data.ConnectionState.Closed, connection.State);
-        }
-#endif
     }
 }

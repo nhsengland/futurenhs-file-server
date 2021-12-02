@@ -1,4 +1,6 @@
-﻿using Azure.Identity;
+﻿using Azure;
+using Core = Azure.Core;
+using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
@@ -13,11 +15,11 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace FutureNHS.WOPIHost.PlatformHelpers
+namespace FutureNHS.WOPIHost.Azure
 {  
     public interface IAzureBlobStoreClient
     {
-        Task<BlobDownloadDetails> FetchBlobAndWriteToStream(string containerName, string blobName, string blobVersion, string contentHash, Stream streamToWriteTo, CancellationToken cancellationToken);
+        Task<BlobDownloadDetails> FetchBlobAndWriteToStream(string containerName, string blobName, string? blobVersion, string contentHash, Stream streamToWriteTo, CancellationToken cancellationToken);
 
         Task<Uri> GenerateEphemeralDownloadLink(string containerName, string blobName, string blobVersion, string publicFacingBlobName, CancellationToken cancellationToken);
     }
@@ -70,7 +72,7 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
             blobClientOptions.Retry.Delay = TimeSpan.FromMilliseconds(800);
             blobClientOptions.Retry.MaxDelay = TimeSpan.FromMinutes(1);
             blobClientOptions.Retry.MaxRetries = 5;
-            blobClientOptions.Retry.Mode = Azure.Core.RetryMode.Exponential;
+            blobClientOptions.Retry.Mode = Core.RetryMode.Exponential;
             blobClientOptions.Retry.NetworkTimeout = TimeSpan.FromSeconds(100);
 
             blobClientOptions.Diagnostics.IsDistributedTracingEnabled = true;
@@ -81,14 +83,13 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
             return blobClientOptions;
         }
 
-        async Task<BlobDownloadDetails> IAzureBlobStoreClient.FetchBlobAndWriteToStream(string containerName, string blobName, string blobVersion, string contentHash, Stream streamToWriteTo, CancellationToken cancellationToken)
+        async Task<BlobDownloadDetails> IAzureBlobStoreClient.FetchBlobAndWriteToStream(string containerName, string blobName, string? blobVersion, string contentHash, Stream streamToWriteTo, CancellationToken cancellationToken)
         {
             // https://docs.microsoft.com/en-us/azure/storage/common/storage-auth-aad-msi
             // https://docs.microsoft.com/en-gb/dotnet/api/overview/azure/identity-readme
 
             if (string.IsNullOrWhiteSpace(containerName)) throw new ArgumentNullException(nameof(containerName));
             if (string.IsNullOrWhiteSpace(blobName)) throw new ArgumentNullException(nameof(blobName));
-            if (string.IsNullOrWhiteSpace(blobVersion)) throw new ArgumentNullException(nameof(blobVersion));
             if (string.IsNullOrWhiteSpace(contentHash)) throw new ArgumentNullException(nameof(contentHash));
 
             if (streamToWriteTo is null) throw new ArgumentNullException(nameof(streamToWriteTo));
@@ -105,7 +106,9 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
 
             var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
 
-            var blobClient = containerClient.GetBlobClient(blobName).WithVersion(blobVersion);
+            var blobClient = containerClient.GetBlobClient(blobName);
+            
+            if (blobVersion is not null) blobClient = blobClient.WithVersion(blobVersion);
 
             try
             {
@@ -115,21 +118,25 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
 
                 if (!IsSuccessStatusCode(response.Status))
                 {
-                    _logger?.LogDebug($"Unable to download file from blob storage.  {response.ClientRequestId} - Reported '{ response.ReasonPhrase }' with status code: '{ response.Status } { Enum.Parse(typeof(HttpStatusCode), Convert.ToString(response.Status, CultureInfo.InvariantCulture)) }'");
+                    _logger?.LogDebug("Unable to download file from blob storage.  {ClientRequestId} - Reported '{ReasonPhrase}' with status code: '{StatusCode} {StatusCodeName}'", response.ClientRequestId, response.ReasonPhrase, response.Status, Enum.Parse(typeof(HttpStatusCode), Convert.ToString(response.Status, CultureInfo.InvariantCulture)));
 
                     throw new IrretrievableFileException($"{response.ClientRequestId}: Unable to download file from storage.  Please consult log files for more information");
                 }
 
                 var details = result.Value.Details;
 
-                // TODO - Seems odd I can't supply the expected hash (Content-MD5) in the request for blob storage to validate before
-                //        starting the download (unless properties come back to us before stream is opened) so would be good to confirm
-                //        things are working as we need with minimal overhead (given almost always likely to match)
-                //        Need to test this works with larger files that might be chunked
+                // TODO - Need to understand the correct way to determine that the file hasn't been tampered with since we uploaded it.
+                //        We use blob versioning so if we store the uploaded version then we should be ok so long as we also use the version
+                //        when downloading (albeit we are not storing that yet so cannot implement it), however, might be a good idea
+                //        to verify the original hash code with the one for the file we download.   Have to be careful for larger files
+                //        > 100MB.  Not convinced the existing MVCForum upload code is storing
+                //        the correct hash in the DB (or for that matter not just trusting the one blob store returns, which is really supposed to be
+                //        used to verify it has stored the file correctly) so I need to revisit this fully when time allows.   For now, we 
+                //        cannot check the hashes
 
-                var blobContentHash = Convert.ToBase64String(details.BlobContentHash ?? details.ContentHash);
+                //var blobContentHash = Convert.ToBase64String(details.BlobContentHash ?? details.ContentHash);
 
-                if (0 != string.CompareOrdinal(blobContentHash, contentHash)) throw new IrretrievableFileException($"{response.ClientRequestId}: Unable to share the file with the user as the content hash stored during upload does not match that of the downloaded file - '{blobName}' + '{blobVersion}'");
+                //if (0 != string.CompareOrdinal(blobContentHash, contentHash)) throw new IrretrievableFileException($"{response.ClientRequestId}: Unable to share the file with the user as the content hash stored during upload does not match that of the downloaded file - '{blobName}' + '{blobVersion}'");
 
                 await result.Value.Content.CopyToAsync(streamToWriteTo, cancellationToken);
 
@@ -137,13 +144,13 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
             }
             catch (AuthenticationFailedException ex)
             {
-                _logger?.LogError(ex, "Unable to authenticate with the Azure Blob Storage service using the default credentials");
+                _logger?.LogError(ex, "Unable to authenticate with the Azure Blob Storage service using the default credentials.  Please ensure the user account this application is running under has permissions to access the Blob Storage account we are targeting");
                 
                 throw;
             }
-            catch (Azure.RequestFailedException ex)
+            catch (RequestFailedException ex)
             {
-                _logger?.LogError(ex, $"Unable to access the storage endpoint as the download request failed: '{ ex.Status } { Enum.Parse(typeof(HttpStatusCode), Convert.ToString(ex.Status, CultureInfo.InvariantCulture)) }'");
+                _logger?.LogError(ex, "Unable to access the storage endpoint as the download request failed: '{StatusCode} {StatusCodeName}'", ex.Status, Enum.Parse(typeof(HttpStatusCode), Convert.ToString(ex.Status, CultureInfo.InvariantCulture)));
 
                 throw;
             }
@@ -196,9 +203,9 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
 
                         return azureResponse.Value;
                     }
-                    catch (Azure.RequestFailedException ex)
+                    catch (RequestFailedException ex)
                     {
-                        _logger?.LogError(ex, $"Unable to access the storage endpoint to generate a user delegation key: '{ ex.Status } { Enum.Parse(typeof(HttpStatusCode), Convert.ToString(ex.Status, CultureInfo.InvariantCulture)) }'");
+                        _logger?.LogError(ex, "Unable to access the storage endpoint to generate a user delegation key: '{StatusCode} {StatusCodeName}'", ex.Status, Enum.Parse(typeof(HttpStatusCode), Convert.ToString(ex.Status, CultureInfo.InvariantCulture)));
 
                         throw;
                     }

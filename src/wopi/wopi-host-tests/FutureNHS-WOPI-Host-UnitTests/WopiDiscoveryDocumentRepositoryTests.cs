@@ -109,7 +109,10 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             wopiConfigurationOptionsSnapshot.SetupGet(x => x.Value).Returns(wopiConfiguration);
 
-            var httpResponseMessage = new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+            var httpResponseMessage = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("<xml></xml>", Encoding.UTF8, "application/xml")
+            };
 
             var messageHandlerInvoked = false;
 
@@ -222,7 +225,10 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             wopiConfigurationOptionsSnapshot.SetupGet(x => x.Value).Returns(wopiConfiguration);
 
-            var httpResponseMessage = new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+            var httpResponseMessage = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("<xml></xml>", Encoding.UTF8, "application/xml")
+            };
 
             var httpMessageHandler = new HttpMessageHandlerStub((request, _) => httpResponseMessage);
 
@@ -254,7 +260,10 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             wopiConfigurationOptionsSnapshot.SetupGet(x => x.Value).Returns(wopiConfiguration);
 
-            var httpResponseMessage = new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+            var httpResponseMessage = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("<xml></xml>", Encoding.UTF8, "application/xml")
+            };
 
             httpResponseMessage.Headers.Add("ContentType", "unsupported/contenttype");
 

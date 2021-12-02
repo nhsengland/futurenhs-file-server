@@ -1,6 +1,6 @@
 ﻿using FutureNHS.WOPIHost;
 using FutureNHS.WOPIHost.Configuration;
-using FutureNHS.WOPIHost.Handlers;
+using FutureNHS.WOPIHost.WOPIRequests;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -15,7 +15,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
         [ExpectedException(typeof(ArgumentNullException))]
         public void Ctor_ThrowsIfFeaturesOptionsConfigurationIsNull()
         {
-            _ = new WopiRequestFactory(features: default);
+            _ = new WopiRequestHandlerFactory(features: default);
         }
 
         [TestMethod]
@@ -26,7 +26,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(default(Features));
 
-            _ = new WopiRequestFactory(features: snapshot.Object);
+            _ = new WopiRequestHandlerFactory(features: snapshot.Object);
         }
 
 
@@ -41,9 +41,9 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
-            _ = wopiRequestFactory.TryCreateRequest(request: default, out _);
+            _ = wopiRequestFactory.TryCreateRequestHandler(request: default, out _);
         }
 
         [TestMethod]
@@ -55,11 +55,11 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsFalse(createdOk);
 
@@ -77,7 +77,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
@@ -86,7 +86,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
             httpRequest.Method = HttpMethods.Get;
             httpRequest.Path = "/wopi/files/file-name|file-version";
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsFalse(createdOk);
 
@@ -104,7 +104,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
@@ -112,11 +112,11 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             httpRequest.Method = HttpMethods.Get;
             httpRequest.Path = "/wopi/files/file-name|file-version";
-            httpRequest.QueryString = new QueryString("?access_token=<invalid-access-token>");
+            httpRequest.QueryString = new QueryString("?access_token=");
 
             httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsFalse(createdOk);
 
@@ -134,7 +134,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
@@ -146,15 +146,15 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsTrue(createdOk);
 
             Assert.IsNotNull(wopiRequest);
 
-            Assert.IsInstanceOfType(wopiRequest, typeof(CheckFileInfoWopiRequest), "Expected Check File Info requests to be identified");
+            Assert.IsInstanceOfType(wopiRequest, typeof(CheckFileInfoWopiRequestHandler), "Expected Check File Info requests to be identified");
 
-            var checkFileInfoRequest = (CheckFileInfoWopiRequest)wopiRequest;
+            var checkFileInfoRequest = (CheckFileInfoWopiRequestHandler)wopiRequest;
 
             Assert.AreEqual("<valid-access-token>", checkFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
         }
@@ -168,7 +168,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
@@ -180,15 +180,15 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsTrue(createdOk);
 
             Assert.IsNotNull(wopiRequest);
 
-            Assert.IsInstanceOfType(wopiRequest, typeof(GetFileWopiRequest), "Expected Get File requests to be identified");
+            Assert.IsInstanceOfType(wopiRequest, typeof(GetFileWopiRequestHandler), "Expected Get File requests to be identified");
 
-            var getFileInfoRequest = (GetFileWopiRequest)wopiRequest;
+            var getFileInfoRequest = (GetFileWopiRequestHandler)wopiRequest;
 
             Assert.AreEqual("<valid-access-token>", getFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
         }
@@ -202,7 +202,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
@@ -214,15 +214,15 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsTrue(createdOk);
 
             Assert.IsNotNull(wopiRequest);
 
-            Assert.IsInstanceOfType(wopiRequest, typeof(RedirectToFileStoreRequest), "Expected Redirect to File Store requests to be identified");
+            Assert.IsInstanceOfType(wopiRequest, typeof(RedirectToFileStoreRequestHandler), "Expected Redirect to File Store requests to be identified");
 
-            var getFileInfoRequest = (RedirectToFileStoreRequest)wopiRequest;
+            var getFileInfoRequest = (RedirectToFileStoreRequestHandler)wopiRequest;
 
             Assert.AreEqual("<valid-access-token>", getFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
         }
@@ -236,7 +236,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
@@ -246,17 +246,50 @@ namespace FutureNHS_WOPI_Host_UnitTests
             httpRequest.Path = "/wopi/files/file-name|file-version/contents";
             httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>");
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsTrue(createdOk);
 
             Assert.IsNotNull(wopiRequest);
 
-            Assert.IsInstanceOfType(wopiRequest, typeof(PostFileWopiRequest), "Expected Save File requests to be identified");
+            Assert.IsInstanceOfType(wopiRequest, typeof(PostFileWopiRequestHandler), "Expected Save File requests to be identified");
 
-            var postFileInfoRequest = (PostFileWopiRequest)wopiRequest;
+            var postFileInfoRequest = (PostFileWopiRequestHandler)wopiRequest;
 
             Assert.AreEqual("<valid-access-token>", postFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
+        }
+
+        [TestMethod]
+        public void CreateRequest_IdentifiesAuthUserRequest()
+        {
+            var features = new Features();
+
+            var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
+
+            snapshot.SetupGet(x => x.Value).Returns(features);
+
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+
+            var httpContext = new DefaultHttpContext();
+
+            var httpRequest = httpContext.Request;
+
+            httpRequest.Method = HttpMethods.Post;
+            httpRequest.Path = "/wopi/files/file-name|file-version/authorise-user";
+            httpRequest.QueryString = new QueryString("?permission=view");
+
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+
+            Assert.IsTrue(createdOk);
+
+            Assert.IsNotNull(wopiRequest);
+
+            Assert.IsInstanceOfType(wopiRequest, typeof(PostAuthoriseUserRequestHandler), "Expected Authorise User requests to be identified");
+
+            var postAuthoriseUserRequestHandler = (PostAuthoriseUserRequestHandler)wopiRequest;
+
+            Assert.IsNotNull(postAuthoriseUserRequestHandler.AccessToken, "Expected the access token to be created for the user");
+            Assert.AreEqual(PostAuthoriseUserRequestHandler.FileAccessPermissions.View, postAuthoriseUserRequestHandler.Permission, "Expected the user to be granted view permissions");
         }
 
         [TestMethod]
@@ -268,7 +301,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestFactory wopiRequestFactory = new WopiRequestFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
@@ -278,7 +311,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
             httpRequest.Path = "/wopi/folders/";
             httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>");
 
-            var createdOk = wopiRequestFactory.TryCreateRequest(request: httpContext.Request, out var wopiRequest);
+            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
 
             Assert.IsFalse(createdOk);
 

@@ -1,4 +1,5 @@
 ﻿using Dapper;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore.SqlServer.Storage.Internal;
 using Microsoft.Extensions.Logging;
 using Polly;
@@ -7,12 +8,11 @@ using Polly.Wrap;
 using System;
 using System.Collections.Concurrent;
 using System.ComponentModel;
-using System.Data.SqlClient;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace FutureNHS.WOPIHost.PlatformHelpers
+namespace FutureNHS.WOPIHost.Azure
 {
     public interface IAzureSqlClient
     {
@@ -21,7 +21,7 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
 
     public sealed class AzureSqlClient : IAzureSqlClient
     {
-        private readonly static ConcurrentDictionary<string, AsyncPolicyWrap> _globalPolicies = new ConcurrentDictionary<string, AsyncPolicyWrap>();
+        private readonly static ConcurrentDictionary<string, AsyncPolicyWrap> _globalPolicies = new();
 
         private readonly IAzureSqlDbConnectionFactory _azureSqlDbConnectionFactory;
         private readonly ILogger<AzureSqlClient>? _logger;
@@ -56,7 +56,6 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
         }
 
 
-        [SuppressMessage("Usage", "EF1001:Internal EF Core API usage.", Justification = "Understand this is an internal API and risks of future incompatibility")]
 #if DEBUG
         internal
 #else
@@ -99,7 +98,7 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
                           sleepDurationProvider: retryNumber => TimeSpan.FromSeconds(Math.Pow(2, retryNumber)) + TimeSpan.FromMilliseconds(jitterer.Next(0, 100)),
                           (ex, sleepingFor, retryNumber, ctxt) =>
                           {
-                              _logger?.LogTrace($"Azure SQL Retry handler on iteration {retryNumber} sleeping {sleepingFor.TotalMilliseconds} ms after error '{ex.Message}' against context {ctxt.CorrelationId}");
+                              _logger?.LogTrace("Azure SQL Retry handler on iteration {RetryNumber} sleeping {SleepDuration} ms after error '{ErrorMsg}' against context {CorrelationId}", retryNumber, sleepingFor.TotalMilliseconds, ex.Message, ctxt.CorrelationId);
                           }
                       );
 
@@ -127,9 +126,9 @@ namespace FutureNHS.WOPIHost.PlatformHelpers
                    OrInner<Win32Exception>(SqlServerTransientExceptionDetector.ShouldRetryOn).
                    AdvancedCircuitBreakerAsync(
                       failureThreshold: 0.25,                             // If 25% or more of requests fail
-                      samplingDuration: TimeSpan.FromSeconds(60),         // in a 60 second period
+                      samplingDuration: TimeSpan.FromSeconds(60),   // in a 60 second period
                       minimumThroughput: 7,                               // and there have been at least 7 requests in that time
-                      durationOfBreak: TimeSpan.FromSeconds(30)           // then open the circuit for 30 seconds
+                      durationOfBreak: TimeSpan.FromSeconds(30)     // then open the circuit for 30 seconds
                       );
     }
 }

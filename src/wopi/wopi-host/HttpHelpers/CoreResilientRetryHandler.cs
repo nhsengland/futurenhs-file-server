@@ -5,7 +5,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace FutureNHS.WOPIHost.HttpHelpers
+namespace FutureNHS.WOPIHost
 {
     /// <summary>
     /// Core message handler that adds circuit breaker, bulkhead and optionally retry policies to an HttpRequest (for HttpMethod.Get)

@@ -39,10 +39,17 @@ namespace FutureNHS.WOPIHost
 
             var root = _xml.Element(XName.Get("wopi-discovery"));
 
+            if (root is null) throw new ArgumentException("The wopi discovery document xml is expected to have a root element called wopi-discovery.  The supplied xml is not considered well formed.", nameof(xml));
+
             var proofKey = root.Element(XName.Get("proof-key"));
 
-            _publicKeyCspBlob = proofKey.Attribute(XName.Get("value")).Value;
-            _oldPublicKeyCspBlob = proofKey.Attribute(XName.Get("oldvalue")).Value;
+            if (proofKey is null) throw new ArgumentException("The root element 'wopi-discovery' is expected to have an immediate child named 'proof-key'.  The supplied xml is not considered well formed.", nameof(xml));
+
+            _publicKeyCspBlob = proofKey.Attribute(XName.Get("value"))?.Value;
+            _oldPublicKeyCspBlob = proofKey.Attribute(XName.Get("oldvalue"))?.Value;
+
+            if (string.IsNullOrWhiteSpace(_publicKeyCspBlob)) throw new ArgumentException("The value attribute of the proof-key element in the xml is either null or empty.  The supplied xml is not considered well formed.", nameof(xml));
+            if (string.IsNullOrWhiteSpace(_oldPublicKeyCspBlob)) throw new ArgumentException("The oldValue attribute of the proof-key element in the xml is either null or empty.  The supplied xml is not considered well formed.", nameof(xml));
         }
 
         string? IWopiProofKeysProvider.PublicKeyCspBlob => _publicKeyCspBlob;
@@ -86,6 +93,8 @@ namespace FutureNHS.WOPIHost
         {
             // https://wopi.readthedocs.io/en/latest/discovery.html
 
+            const Uri? UNABLE_TO_LOCATE_ENDPOINT_FOR_FILE = default;
+
             if (IsEmpty) throw new WopiDiscoveryDocumentEmptyException();
 
             Debug.Assert(_xml is object);
@@ -96,7 +105,7 @@ namespace FutureNHS.WOPIHost
             if (wopiHostFileEndpointUrl is null) return default;
             if (!wopiHostFileEndpointUrl.IsAbsoluteUri) return default;
 
-            if (fileExtension.StartsWith('.')) fileExtension = fileExtension.Substring(1);
+            if (fileExtension.StartsWith('.')) fileExtension = fileExtension[1..];
 
             var contentTypeProvider = new FileExtensionContentTypeProvider();
 
@@ -104,34 +113,43 @@ namespace FutureNHS.WOPIHost
 
             var rootElement = _xml.Element(XName.Get("wopi-discovery"));
 
+            Debug.Assert(rootElement is not null);
+
             var netZoneElement = rootElement.Element(XName.Get("net-zone"));
+
+            if (netZoneElement is null) return UNABLE_TO_LOCATE_ENDPOINT_FOR_FILE;
 
             foreach (var appElement in netZoneElement.Elements("app"))
             {
-                var appName = appElement.Attribute("name").Value;
+                var appName = appElement.Attribute("name")?.Value;
 
-                foreach (var actionElement in appElement.Elements("action"))
+                if (!string.IsNullOrWhiteSpace(appName))
                 {
-                    if (!string.Equals(appName, fileContentType, StringComparison.OrdinalIgnoreCase))
+                    foreach (var actionElement in appElement.Elements("action"))
                     {
-                        var ext = actionElement.Attribute("ext").Value;
+                        if (!string.Equals(appName, fileContentType, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var ext = actionElement.Attribute("ext")?.Value;
 
-                        if (!string.Equals(ext, fileExtension, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!string.Equals(ext, fileExtension, StringComparison.OrdinalIgnoreCase)) continue;
 
-                        var name = actionElement.Attribute("name").Value; // https://wopi.readthedocs.io/en/latest/discovery.html#wopi-actions
+                            var name = actionElement.Attribute("name")?.Value; // https://wopi.readthedocs.io/en/latest/discovery.html#wopi-actions
 
-                        if (!string.Equals(name, fileAction, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!string.Equals(name, fileAction, StringComparison.OrdinalIgnoreCase)) continue;
+                        }
+
+                        var urlSrc = actionElement.Attribute("urlsrc")?.Value;
+
+                        if (string.IsNullOrWhiteSpace(urlSrc)) continue;
+
+                        urlSrc = TransformActionUrlSrcAttribute(urlSrc, wopiHostFileEndpointUrl);
+
+                        return new Uri(string.Concat(urlSrc, "WOPISrc=", wopiHostFileEndpointUrl.AbsoluteUri), UriKind.Absolute);
                     }
-
-                    var urlSrc = actionElement.Attribute("urlsrc").Value;
-
-                    urlSrc = TransformActionUrlSrcAttribute(urlSrc, wopiHostFileEndpointUrl);
-
-                    return new Uri(string.Concat(urlSrc, "WOPISrc=", wopiHostFileEndpointUrl.AbsoluteUri), UriKind.Absolute);
                 }
             }
 
-            return default;
+            return UNABLE_TO_LOCATE_ENDPOINT_FOR_FILE;
         }
 
         /// <summary>
@@ -152,7 +170,7 @@ namespace FutureNHS.WOPIHost
             // https://wopi.readthedocs.io/en/latest/discovery.html#transforming-the-urlsrc-parameter
 
             Debug.Assert(!string.IsNullOrWhiteSpace(urlSrc));
-            Debug.Assert(wopiHostFileEndpointUrl is object && wopiHostFileEndpointUrl.IsAbsoluteUri);
+            Debug.Assert(wopiHostFileEndpointUrl is not null && wopiHostFileEndpointUrl.IsAbsoluteUri);
 
             // If the urlSrc contains a placeholder for the wopiSrc then we must replace with the correct value
 
@@ -175,7 +193,7 @@ namespace FutureNHS.WOPIHost
                 {
                     i = urlSrc.IndexOf("=PLACEHOLDER_VALUE>", n, StringComparison.Ordinal);
 
-                    urlSrc = urlSrc.Substring(0, n) + urlSrc.Substring(i + "=PLACEHOLDER_VALUE>".Length);
+                    urlSrc = string.Concat(urlSrc.AsSpan(0, n), urlSrc.AsSpan(i + "=PLACEHOLDER_VALUE>".Length));
                 }
                 else if (0 == n)
                 {
@@ -183,7 +201,7 @@ namespace FutureNHS.WOPIHost
                 }
                 else
                 { 
-                    urlSrc = urlSrc.Substring(0, n) + urlSrc.Substring(i + "=PLACEHOLDER_VALUE[&]>".Length);
+                    urlSrc = string.Concat(urlSrc.AsSpan(0, n), urlSrc.AsSpan(i + "=PLACEHOLDER_VALUE[&]>".Length));
                 }
             }
 

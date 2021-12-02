@@ -1,6 +1,6 @@
 ﻿using FutureNHS.WOPIHost;
 using FutureNHS.WOPIHost.Configuration;
-using FutureNHS.WOPIHost.Handlers;
+using FutureNHS.WOPIHost.WOPIRequests;
 using FutureNHS_WOPI_Host_UnitTests.Stubs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
@@ -20,7 +20,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
         [TestMethod]
         public void CTor_DoesNotThrowIfNextItemInPipelineIsNull()
         {
-            new WopiMiddleware(next: default);
+            _ = new WopiMiddleware(next: default);
         }
 
 
@@ -50,9 +50,9 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             services.Configure<Features>(configuration.GetSection("FeatureManagement"));
 
-            services.AddScoped<WopiRequestFactory>();
-            services.AddScoped<IWopiRequestFactory>(sp => sp.GetRequiredService<WopiRequestFactory>());
-            services.AddScoped(sp => new Moq.Mock<IFileRepository>().Object);
+            services.AddScoped<WopiRequestHandlerFactory>();
+            services.AddScoped<IWopiRequestHandlerFactory>(sp => sp.GetRequiredService<WopiRequestHandlerFactory>());
+            services.AddScoped(sp => new Moq.Mock<IFileMetadataProvider>().Object);
 
             var serviceProvider = services.BuildServiceProvider();
 
@@ -101,11 +101,11 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var requestFactoryInvoked = false;
 
-            var wopiRequestFactory = new Moq.Mock<IWopiRequestFactory>();
+            var wopiRequestFactory = new Moq.Mock<IWopiRequestHandlerFactory>();
 
-            var emptyWopiRequest = WopiRequest.EMPTY;
+            var emptyWopiRequest = WopiRequestHandler.Empty;
 
-            wopiRequestFactory.Setup(x => x.TryCreateRequest(Moq.It.IsAny<HttpRequest>(), out emptyWopiRequest)).Returns(false).Callback(() => { requestFactoryInvoked = true; });
+            wopiRequestFactory.Setup(x => x.TryCreateRequestHandler(Moq.It.IsAny<HttpRequest>(), out emptyWopiRequest)).Returns(false).Callback(() => { requestFactoryInvoked = true; });
 
             services.AddScoped(sp => wopiRequestFactory.Object);
 
@@ -121,7 +121,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
         }
 
 
-        delegate void TryCreateRequestDelegate(HttpRequest httpRequest, out WopiRequest wopiRequest);
+        delegate void TryCreateRequestDelegate(HttpRequest httpRequest, out WopiRequestHandler wopiRequest);
 
         [TestMethod]
         public async Task Invoke_ProcessRequest_DefersToWopiProofCheckerToVerifyPresentedProofs()
@@ -134,14 +134,14 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var configuration = configurationBuilder.Build();
 
-            var wopiRequestStub = new WopiRequestStub((_, __) => Task.CompletedTask);
+            var wopiRequestStub = new WopiRequestHandlerStub((_, __) => Task.CompletedTask);
 
-            var wopiRequestFactory = new Moq.Mock<IWopiRequestFactory>();
+            var wopiRequestFactory = new Moq.Mock<IWopiRequestHandlerFactory>();
 
-            var wopiRequest = default(WopiRequest);
+            var wopiRequest = default(WopiRequestHandler);
 
-            wopiRequestFactory.Setup(x => x.TryCreateRequest(Moq.It.IsAny<HttpRequest>(), out wopiRequest)).
-                Callback(new TryCreateRequestDelegate((HttpRequest httpRequest, out WopiRequest _) => _ = wopiRequestStub)).
+            wopiRequestFactory.Setup(x => x.TryCreateRequestHandler(Moq.It.IsAny<HttpRequest>(), out wopiRequest)).
+                Callback(new TryCreateRequestDelegate((HttpRequest httpRequest, out WopiRequestHandler _) => _ = wopiRequestStub)).
                 Returns(true);
 
             var proofCheckerInvoked = false;
@@ -206,10 +206,10 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             services.Configure<Features>(configuration.GetSection("FeatureManagement"));
 
-            services.AddScoped<WopiRequestFactory>();
-            services.AddScoped<IWopiRequestFactory>(sp => sp.GetRequiredService<WopiRequestFactory>());
+            services.AddScoped<WopiRequestHandlerFactory>();
+            services.AddScoped<IWopiRequestHandlerFactory>(sp => sp.GetRequiredService<WopiRequestHandlerFactory>());
 
-            services.AddScoped(sp => new Moq.Mock<IFileRepository>().Object);
+            services.AddScoped(sp => new Moq.Mock<IFileMetadataProvider>().Object);
 
             var serviceProvider = services.BuildServiceProvider();
 
@@ -233,14 +233,14 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var wopiRequestHandlerInvoked = false;
 
-            var wopiRequestStub = new WopiRequestStub((_, __) => { wopiRequestHandlerInvoked = true; return Task.CompletedTask; });
+            var wopiRequestStub = new WopiRequestHandlerStub((_, __) => { wopiRequestHandlerInvoked = true; return Task.CompletedTask; });
 
-            var wopiRequestFactory = new Moq.Mock<IWopiRequestFactory>();
+            var wopiRequestFactory = new Moq.Mock<IWopiRequestHandlerFactory>();
 
-            var wopiRequest = default(WopiRequest);
+            var wopiRequest = default(WopiRequestHandler);
 
-            wopiRequestFactory.Setup(x => x.TryCreateRequest(Moq.It.IsAny<HttpRequest>(), out wopiRequest)).
-                Callback(new TryCreateRequestDelegate((HttpRequest httpRequest, out WopiRequest _) => _ = wopiRequestStub)).
+            wopiRequestFactory.Setup(x => x.TryCreateRequestHandler(Moq.It.IsAny<HttpRequest>(), out wopiRequest)).
+                Callback(new TryCreateRequestDelegate((HttpRequest httpRequest, out WopiRequestHandler _) => _ = wopiRequestStub)).
                 Returns(true);
 
             var wopiCryptoProofChecker = new Moq.Mock<IWopiCryptoProofChecker>();
@@ -306,7 +306,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var wopiDiscoveryDocumentRepository = new Moq.Mock<IWopiDiscoveryDocumentRepository>();
 
-            var fileRepository = new Moq.Mock<IFileRepository>();
+            var fileRepository = new Moq.Mock<IFileMetadataProvider>();
 
             var services = new ServiceCollection();
 
@@ -315,8 +315,8 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             services.Configure<Features>(configuration.GetSection("FeatureManagement"));
 
-            services.AddScoped<WopiRequestFactory>();
-            services.AddScoped<IWopiRequestFactory>(sp => sp.GetRequiredService<WopiRequestFactory>());
+            services.AddScoped<WopiRequestHandlerFactory>();
+            services.AddScoped<IWopiRequestHandlerFactory>(sp => sp.GetRequiredService<WopiRequestHandlerFactory>());
 
             services.AddScoped<WopiDiscoveryDocumentFactory>();
             services.AddScoped<IWopiDiscoveryDocumentFactory>(sp => sp.GetRequiredService<WopiDiscoveryDocumentFactory>());
@@ -364,7 +364,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             wopiDiscoveryDocumentFactory.Setup(x => x.CreateDocumentAsync(Moq.It.IsAny<CancellationToken>())).Returns(Task.FromResult< IWopiDiscoveryDocument>(WopiDiscoveryDocument.Empty));
 
-            var fileRepository = new Moq.Mock<IFileRepository>();
+            var fileRepository = new Moq.Mock<IFileMetadataProvider>();
 
             var services = new ServiceCollection();
 
@@ -373,8 +373,8 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             services.Configure<Features>(configuration.GetSection("FeatureManagement"));
 
-            services.AddScoped<WopiRequestFactory>();
-            services.AddScoped<IWopiRequestFactory>(sp => sp.GetRequiredService<WopiRequestFactory>());
+            services.AddScoped<WopiRequestHandlerFactory>();
+            services.AddScoped<IWopiRequestHandlerFactory>(sp => sp.GetRequiredService<WopiRequestHandlerFactory>());
 
             services.AddScoped(sp => wopiDiscoveryDocumentFactory.Object);
             services.AddScoped(sp => fileRepository.Object);

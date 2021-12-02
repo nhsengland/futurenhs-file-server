@@ -29,22 +29,19 @@ namespace FutureNHS_WOPI_Host_UnitTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void With_ThrowsIfFileVersionIsNull()
+        public void With_DoesNotThrowIfFileVersionIsNull()
         {
             _ = File.With(fileName: "file-name", fileVersion: default);
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void With_ThrowsIfFileVersionIsEmpty()
+        public void With_DoesNotThrowIfFileVersionIsEmpty()
         {
             _ = File.With(fileName: "file-name", fileVersion: string.Empty);
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void With_ThrowsIfFileVersionIsWhiteSpace()
+        public void With_DoesNotThrowIfFileVersionIsWhiteSpace()
         {
             _ = File.With(fileName: "file-name", fileVersion: " ");
         }
@@ -148,7 +145,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
 
         [TestMethod]
-        public void IsEmpty_ReturnsTrueForBlindlyConstructedInstant()
+        public void IsEmpty_ReturnsTrueForBlindlyConstructedInstance()
         {
             var file = new File();
 
@@ -327,7 +324,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
             Assert.IsTrue(empty.IsEmpty);
 
             var emptyAsString = (string)empty;
-
+            
             Assert.IsNull(emptyAsString);
         }
 
@@ -364,7 +361,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
         [TestMethod]
         public void ImplicitConvertFromString_ReturnsEmptyWhenSourceNotParsable()
         {
-            var str = "cannot-parse-me";
+            var str = "";
 
             var file = (File)str;
 

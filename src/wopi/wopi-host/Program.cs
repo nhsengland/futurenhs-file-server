@@ -1,3 +1,4 @@
+using Azure;
 using Azure.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -19,7 +20,7 @@ namespace FutureNHS.WOPIHost
             {
                 CreateHostBuilder(args).Build().Run();
             }
-            catch (Azure.RequestFailedException ex)
+            catch (RequestFailedException ex)
             {
                 if (ex.Status == StatusCodes.Status429TooManyRequests)
                 {

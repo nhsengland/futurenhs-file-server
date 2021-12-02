@@ -1,6 +1,6 @@
+using FutureNHS.WOPIHost.Azure;
 using FutureNHS.WOPIHost.Configuration;
-using FutureNHS.WOPIHost.HttpHelpers;
-using FutureNHS.WOPIHost.PlatformHelpers;
+using FutureNHS.WOPIHost.WOPIRequests;
 using Microsoft.ApplicationInsights.DependencyCollector;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -15,10 +15,13 @@ using Microsoft.Extensions.Options;
 using Microsoft.FeatureManagement;
 using Microsoft.FeatureManagement.FeatureFilters;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Dynamic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace FutureNHS.WOPIHost
@@ -27,10 +30,7 @@ namespace FutureNHS.WOPIHost
     {
         private readonly IConfiguration _configuration;
 
-        public Startup(IConfiguration configuration)
-        {
-            _configuration = configuration;
-        }
+        public Startup(IConfiguration configuration) => _configuration = configuration;
 
         // This method gets called by the runtime. Use this method to add services to the container.
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
@@ -96,11 +96,19 @@ namespace FutureNHS.WOPIHost
                     return new AzureSqlDbConnectionFactory(config.ReadWriteConnectionString, config.ReadOnlyConnectionString, logger);
                     });
 
-            services.AddScoped<AzureSqlClient>();
-            services.AddScoped<IAzureSqlClient>(sp => sp.GetRequiredService<AzureSqlClient>());
+            services.AddScoped<IAzureSqlClient, AzureSqlClient>();
 
-            services.AddScoped<FileRepository>();
-            services.AddScoped<IFileRepository>(sp => sp.GetRequiredService<FileRepository>());
+            services.AddScoped<IFileContentMetadataRepository, FileContentMetadataRepository>();
+            services.AddScoped<IFileContentService, FileContentService>();
+
+            services.AddScoped<IFileMetadataProvider, FileMetadataProvider>();
+            services.AddScoped<IFileMetadataProvider, FileMetadataProvider>();
+
+            //services.AddScoped<AzureSqlClient>();
+            //services.AddScoped<IAzureSqlClient>(sp => sp.GetRequiredService<AzureSqlClient>());
+
+            //services.AddScoped<FileMetadataRepository>();
+            //services.AddScoped<IFileMetadataRepository>(sp => sp.GetRequiredService<FileMetadataRepository>());
 
             services.AddScoped<WopiDiscoveryDocumentFactory>();
             services.AddScoped<IWopiDiscoveryDocumentFactory>(sp => sp.GetRequiredService<WopiDiscoveryDocumentFactory>());
@@ -108,8 +116,8 @@ namespace FutureNHS.WOPIHost
             services.AddScoped<WopiDiscoveryDocumentRepository>();
             services.AddScoped<IWopiDiscoveryDocumentRepository>(sp => sp.GetRequiredService<WopiDiscoveryDocumentRepository>());
 
-            services.AddScoped<WopiRequestFactory>();
-            services.AddScoped<IWopiRequestFactory>(sp => sp.GetRequiredService<WopiRequestFactory>());
+            services.AddScoped<WopiRequestHandlerFactory>();
+            services.AddScoped<IWopiRequestHandlerFactory>(sp => sp.GetRequiredService<WopiRequestHandlerFactory>());
 
             services.AddScoped<WopiCryptoProofChecker>();
             services.AddScoped<IWopiCryptoProofChecker>(sp => sp.GetRequiredService<WopiCryptoProofChecker>());
@@ -121,7 +129,7 @@ namespace FutureNHS.WOPIHost
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILogger<Startup> logger)
         {
             if (env.IsDevelopment())
             {
@@ -154,13 +162,13 @@ namespace FutureNHS.WOPIHost
 
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapGet("/error", GetProductionErrorPage);
+                endpoints.MapGet("/error", GetProductionErrorPageAsync);
                 endpoints.MapGet("/wopi/health-check", GetHealthCheckPageAsync);
-                endpoints.MapGet("/wopi/collabora",  ctxt => GetCollaboraHostPageAsync(ctxt));
+                endpoints.MapGet("/wopi/collabora",  GetCollaboraHostPageAsync);
            });
         }
 
-        private static async Task GetProductionErrorPage(HttpContext httpContext)
+        private static async Task GetProductionErrorPageAsync(HttpContext httpContext)
         {
             httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
 
@@ -173,6 +181,7 @@ namespace FutureNHS.WOPIHost
             sb.AppendLine($"      ==============================</br>");
             sb.AppendLine($"      Oooops - Internal server error</br>");
             sb.AppendLine($"      ==============================</br>");
+            sb.AppendLine($"      Check internal log files for more information</br>");
             sb.AppendLine($"    </p>");
             sb.AppendLine($"  </body>");
             sb.AppendLine($"</html>");
@@ -243,41 +252,77 @@ namespace FutureNHS.WOPIHost
             // the encrption keys it is using to sign the callback requests it sends to us.  We will use these keys to assure non-reupidation/tampering
             // If we fail to load this file, we cannot continue to build the page we are return
 
-            var wopiDiscoveryDocumentFactory = httpContext.RequestServices.GetRequiredService<IWopiDiscoveryDocumentFactory>();
+            //var wopiDiscoveryDocumentFactory = httpContext.RequestServices.GetRequiredService<IWopiDiscoveryDocumentFactory>();
 
-            var wopiDiscoveryDocument = await wopiDiscoveryDocumentFactory.CreateDocumentAsync(cancellationToken);
+            //var wopiDiscoveryDocument = await wopiDiscoveryDocumentFactory.CreateDocumentAsync(cancellationToken);
 
-            if (wopiDiscoveryDocument.IsEmpty) throw new ApplicationException("Unable to download the WOPI Discovery Document - remote host is either unavailable or returned non-success status code");  
+            //if (wopiDiscoveryDocument.IsEmpty) throw new ApplicationException("Unable to download the WOPI Discovery Document - remote host is either unavailable or returned non-success status code");  
 
             // Identify the file that we want to view/edit by inspecting the incoming request for an id.  
 
             var fileId = httpContext.Request.Query["file_id"].FirstOrDefault()?.Trim();
 
-            if (string.IsNullOrWhiteSpace(fileId)) fileId = File.With("DF796179-DB2F-4A06-B4D5-AD7F012CC2CC", "2021-08-09T18:15:02.4214747Z");
+            const string LATEST_FILE_VERSION = "";
+            const string FILENAME_ON_CDSDEV = "E399A9B2-2783-41F0-AC9B-ADA60087FF21";
 
-            var wopiConfiguration = httpContext.RequestServices.GetRequiredService<IOptionsSnapshot<WopiConfiguration>>().Value;
+            if (string.IsNullOrWhiteSpace(fileId)) fileId = File.With(FILENAME_ON_CDSDEV, LATEST_FILE_VERSION); // "DF796179-DB2F-4A06-B4D5-AD7F012CC2CC", "2021-08-09T18:15:02.4214747Z");
 
-            var hostFilesUrl = wopiConfiguration.HostFilesUrl;
+            //var wopiConfiguration = httpContext.RequestServices.GetRequiredService<IOptionsSnapshot<WopiConfiguration>>().Value;
 
-            if (string.IsNullOrWhiteSpace(hostFilesUrl)) return;
+            //var hostFilesUrl = wopiConfiguration.HostFilesUrl;
 
-            Debug.Assert(fileId is object);
+            //if (string.IsNullOrWhiteSpace(hostFilesUrl)) return;
 
-            var wopiHostFileEndpointUrl = new Uri(Path.Combine(hostFilesUrl, fileId), UriKind.Absolute);
+            Debug.Assert(fileId is not null);
 
-            var fileRepository = httpContext.RequestServices.GetRequiredService<IFileRepository>();
+            //var wopiHostFileEndpointUrl = new Uri(Path.Combine(hostFilesUrl, fileId), UriKind.Absolute);
 
-            var fileMetadata = await fileRepository.GetMetadataAsync(fileId, cancellationToken);
+            //var fileMetadataProvider = httpContext.RequestServices.GetRequiredService<IFileMetadataProvider>();
 
-            var fileExtension = fileMetadata.Extension;
+            var file = File.FromId(fileId);
 
-            if (string.IsNullOrWhiteSpace(fileExtension)) return;  // TODO - Return appropriate status code to caller
+            //if (file.IsEmpty) throw new ApplicationException($"The file_id query parameter '{fileId}' on the request is incorrectly formed.");
 
-            var fileAction = "view"; // edit | view | etc (see comments in discoveryDoc.GetEndpointForAsync)
+            //var fileMetadata = await fileMetadataProvider.GetForFileAsync(file, cancellationToken);
 
-            var collaboraOnlineEndpoint = wopiDiscoveryDocument.GetEndpointForFileExtension(fileExtension, fileAction, wopiHostFileEndpointUrl);
+            //var fileExtension = fileMetadata.Extension;
 
-            if (collaboraOnlineEndpoint is null || !collaboraOnlineEndpoint.IsAbsoluteUri) return;  // TODO - Return appropriate status code to caller
+            //if (string.IsNullOrWhiteSpace(fileExtension)) return;  // TODO - Return appropriate status code to caller
+
+            //var fileAction = "view"; // edit | view | etc (see comments in discoveryDoc.GetEndpointForAsync)
+
+            //var collaboraOnlineEndpoint = wopiDiscoveryDocument.GetEndpointForFileExtension(fileExtension, fileAction, wopiHostFileEndpointUrl);
+
+            //if (collaboraOnlineEndpoint is null || !collaboraOnlineEndpoint.IsAbsoluteUri) return;  // TODO - Return appropriate status code to caller
+
+            var userAuthToken = Guid.NewGuid().ToString();
+
+            var postAuthRequestHandler = PostAuthoriseUserRequestHandler.With(userAuthToken, PostAuthoriseUserRequestHandler.FileAccessPermissions.View, file);
+
+            var fakeHttpContext = new DefaultHttpContext() { 
+                RequestServices = httpContext.RequestServices,
+            };
+
+            using var responseBodyStream = new MemoryStream();
+
+            fakeHttpContext.Response.Body = responseBodyStream;
+
+            await postAuthRequestHandler.HandleAsync(fakeHttpContext, cancellationToken);
+
+            if (fakeHttpContext.Response.StatusCode != 200) throw new ApplicationException("Unable to get the user auth data");
+
+            Debug.Assert(responseBodyStream is not null);
+
+            responseBodyStream.Position = 0;
+
+            var responseBody = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(responseBodyStream, cancellationToken: cancellationToken);
+
+            Debug.Assert(responseBody is not null);
+
+            var accessToken = responseBody["accessToken"];
+
+            var collaboraOnlineEndpoint = responseBody["wopiClientUrlForFile"];
+
 
             var sb = new StringBuilder();
 
@@ -294,7 +339,7 @@ namespace FutureNHS.WOPIHost
             //        comes from them and hasn't been tampered with outside of the servers)
             //        For now, we'll just use a Guid
 
-            var accessToken = Guid.NewGuid().ToString().Replace("-", string.Empty);
+            //var accessToken = Guid.NewGuid().ToString().Replace("-", string.Empty);
 
             // TODO - This is either going to have to be generated by MVCForum or somehow injected by it after a call to our API,
             //        but given the need for input elements, it might be more appropriate for us to just generate the token and 
@@ -306,10 +351,25 @@ namespace FutureNHS.WOPIHost
             sb.AppendLine($"<!doctype html>");
             sb.AppendLine($"<html>");
             sb.AppendLine($"  <body>");
-            sb.AppendLine($"    <form action=\"{collaboraOnlineEndpoint.AbsoluteUri}\" enctype =\"multipart/form-data\" method=\"post\">");
+
+            sb.AppendLine($"    <form action=\"{collaboraOnlineEndpoint}\" enctype =\"multipart/form-data\" method=\"post\">");
             sb.AppendLine($"      <input name=\"access_token\" value=\"{ accessToken }\" type=\"hidden\">");
-            sb.AppendLine($"      <input type=\"submit\" value=\"Load Document (Collabora)\">");
+            sb.AppendLine($"      <input type=\"submit\" value=\"View Document\">");
             sb.AppendLine($"    </form>");
+
+            sb.AppendLine($"    <form action=\"{collaboraOnlineEndpoint}\" enctype =\"multipart/form-data\" method=\"post\" target=\"collabora_host_frame\">");
+            sb.AppendLine($"      <input name=\"access_token\" value=\"{ accessToken }\" type=\"hidden\">");
+            sb.AppendLine($"      <input type=\"submit\" value=\"View Document in iFrame\">");
+            sb.AppendLine($"    </form>");
+
+            sb.AppendLine($"    <form action=\"{collaboraOnlineEndpoint}\" enctype =\"multipart/form-data\" method=\"post\" target=\"_blank\">");
+            sb.AppendLine($"      <input name=\"access_token\" value=\"{ accessToken }\" type=\"hidden\">");
+            sb.AppendLine($"      <input type=\"submit\" value=\"View Document in new Window\">");
+            sb.AppendLine($"    </form>");
+
+            sb.AppendLine($"    <iframe name=\"collabora_host_frame\" allowfullscreen width=\"500px\" height=\"750px\">");
+            sb.AppendLine($"    </iframe>");
+
             sb.AppendLine($"  </body>");
             sb.AppendLine($"</html>");
 

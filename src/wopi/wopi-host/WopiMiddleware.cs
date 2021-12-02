@@ -47,7 +47,7 @@ namespace FutureNHS.WOPIHost
         /// </summary>
         /// <param name="httpContext">The context associated with the request</param>
         /// <returns>true if it was identified and handled, else false</returns>
-        private async Task<bool> ProcessRequest(HttpContext httpContext)
+        private static async Task<bool> ProcessRequest(HttpContext httpContext)
         {
             const bool THIS_IS_A_WOPI_REQUEST = true;
             const bool THIS_IS_NOT_A_WOPI_REQUEST = false;
@@ -58,18 +58,18 @@ namespace FutureNHS.WOPIHost
 
             var logger = httpContext.RequestServices.GetService<ILogger<WopiMiddleware>>();
 
-            var wopiRequestFactory = httpContext.RequestServices.GetRequiredService<IWopiRequestFactory>();
+            var wopiRequestFactory = httpContext.RequestServices.GetRequiredService<IWopiRequestHandlerFactory>();
 
-            if (!wopiRequestFactory.TryCreateRequest(httpContext.Request, out var wopiRequest)) return THIS_IS_NOT_A_WOPI_REQUEST;
+            if (!wopiRequestFactory.TryCreateRequestHandler(httpContext.Request, out var wopiRequestHandler)) return THIS_IS_NOT_A_WOPI_REQUEST;
 
-            Debug.Assert(!wopiRequest.IsEmpty);
-            Debug.Assert(wopiRequest.DemandsProof.HasValue);
+            Debug.Assert(!wopiRequestHandler.IsEmpty);
+            Debug.Assert(wopiRequestHandler.DemandsProof.HasValue);
 
             logger?.LogTrace($"Looks like a WOPI request so going to try and route it to the correct handler");
 
-            if (wopiRequest.DemandsProof.Value)
+            if (wopiRequestHandler.DemandsProof.Value)
             {
-                logger?.LogTrace($"Proof is demanded by the request handler therefore delegating to cryptographically verify the offered proof token: '{wopiRequest.GetType().Name}'");
+                logger?.LogTrace("Proof is demanded by the request handler - delegating to cryptographically verify the offered proof token: '{WOPIRequestHandlerType}'", wopiRequestHandler.GetType().Name);
 
                 var wopiDiscoveryDocumentFactory = httpContext.RequestServices.GetRequiredService<IWopiDiscoveryDocumentFactory>();
 
@@ -83,14 +83,14 @@ namespace FutureNHS.WOPIHost
 
                 var (isInvalid, refetchProofKeys) = wopiCryptoProofChecker.IsProofInvalid(httpContext.Request, wopiDiscoveryDocument);
 
-                if (refetchProofKeys) wopiDiscoveryDocument.IsTainted = true;
+                if (refetchProofKeys || isInvalid) wopiDiscoveryDocument.IsTainted = true;
 
-                if (isInvalid) throw new ApplicationException("This is a WOPI request but the proof that has been provided is considered invalid for this host to process");
+                if (isInvalid) throw new ApplicationException("This HttpRequest has been identified as a WOPI request but the proof(s) that have been presented by the caller cannot be verified to have been signed by a wopi-client trusted by the application.  If the request is from a valid source, it may be that it's signing keys have rotated without us knowing");
 
-                logger?.LogTrace($"Proof determined valid so routing to the handler of the request: '{wopiRequest.GetType().Name}'");
+                logger?.LogTrace("Presented proof has been determined valid so routing to the handler of the request: '{WopiRequestHandlerTypeName}'", wopiRequestHandler.GetType().Name);
             }
 
-            await wopiRequest.HandleAsync(httpContext, cancellationToken);
+            await wopiRequestHandler.HandleAsync(httpContext, cancellationToken);
 
             return THIS_IS_A_WOPI_REQUEST;
         }

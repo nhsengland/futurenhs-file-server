@@ -15,7 +15,7 @@ namespace FutureNHS.WOPIHost
         {
             if (httpClientBuilder is null) throw new ArgumentNullException(nameof(httpClientBuilder));
 
-            return httpClientBuilder.AddHttpMessageHandler<HttpHelpers.CoreResilientRetryHandler>();
+            return httpClientBuilder.AddHttpMessageHandler<CoreResilientRetryHandler>();
         }
     }
 }

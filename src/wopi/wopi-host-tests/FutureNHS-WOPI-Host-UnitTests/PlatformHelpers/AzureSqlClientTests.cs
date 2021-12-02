@@ -1,4 +1,4 @@
-﻿using FutureNHS.WOPIHost.PlatformHelpers;
+﻿using FutureNHS.WOPIHost.Azure;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Polly;
@@ -240,7 +240,7 @@ namespace FutureNHS_WOPI_Host_UnitTests.PlatformHelpers
                                 }
                                 else
                                 {
-                                    return Task.Delay(-1);
+                                    return Task.Delay(-1, ct);
                                 }
                             }, cancellationToken), 
                         cancellationToken);

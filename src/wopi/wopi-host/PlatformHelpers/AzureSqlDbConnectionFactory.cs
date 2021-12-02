@@ -1,11 +1,11 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Data;
-using System.Data.SqlClient;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace FutureNHS.WOPIHost.PlatformHelpers
+namespace FutureNHS.WOPIHost.Azure
 {
     public interface IAzureSqlDbConnectionFactory : ISqlDbConnectionFactory<IDbConnection>
     {
