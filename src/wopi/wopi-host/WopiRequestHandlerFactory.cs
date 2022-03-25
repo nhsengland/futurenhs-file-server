@@ -6,138 +6,133 @@ using Microsoft.Extensions.Options;
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FutureNHS.WOPIHost
 {
     public interface IWopiRequestHandlerFactory
     {
-        bool TryCreateRequestHandler(HttpRequest request, out WopiRequestHandler wopiRequestHandler);
+        Task<WopiRequestHandler> CreateRequestHandlerAsync(HttpContext httpContext, CancellationToken cancellationToken);
     }
 
     internal sealed class WopiRequestHandlerFactory
         : IWopiRequestHandlerFactory
     {
-        private const string WOPI_PATH_SEGMENT = "/wopi";
-        private const string WOPI_FILES_PATH_SEGMENT = WOPI_PATH_SEGMENT + "/files";
-        private const string WOPI_FOLDERS_PATH_SEGMENT = WOPI_PATH_SEGMENT + "/folders";
-
+        private readonly IUserAuthenticationService _userAuthenticationService;
+        private readonly IUserFileMetadataProvider _userFileMetadataProvider;
         private readonly Features _features;
         private readonly ILogger<WopiRequestHandlerFactory>? _logger;
 
-        public WopiRequestHandlerFactory(IOptionsSnapshot<Features> features, ILogger<WopiRequestHandlerFactory>? logger = default)
+        public WopiRequestHandlerFactory(IUserAuthenticationService userAuthenticationService, IUserFileMetadataProvider userFileMetadataProvider, IOptionsSnapshot<Features> features, ILogger<WopiRequestHandlerFactory>? logger = default)
         {
-            _features = features?.Value ?? throw new ArgumentNullException(nameof(features));
+            _userAuthenticationService = userAuthenticationService ?? throw new ArgumentNullException(nameof(userAuthenticationService));
+            _userFileMetadataProvider = userFileMetadataProvider   ?? throw new ArgumentNullException(nameof(userFileMetadataProvider));
+            _features = features?.Value                            ?? throw new ArgumentNullException(nameof(features));
 
             _logger = logger;
         }
 
-#pragma warning disable CA2254 // Template should be a static expression
-        private bool InvalidWopiRequest(string message, params object[] args) { _logger?.LogTrace(message, args); return false; }
-#pragma warning restore CA2254 // Template should be a static expression
 
-        bool IWopiRequestHandlerFactory.TryCreateRequestHandler(HttpRequest httpRequest, out WopiRequestHandler wopiRequestHandler)
+        async Task<WopiRequestHandler> IWopiRequestHandlerFactory.CreateRequestHandlerAsync(HttpContext httpContext, CancellationToken cancellationToken)
         {
-            const bool THIS_IS_A_VALID_WOPI_FILE_REQUEST = true;
-            const bool THIS_IS_NOT_A_WOPI_FILE_REQUEST = false;
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (httpRequest is null) throw new ArgumentNullException(nameof(httpRequest));
+            if (httpContext is null) throw new ArgumentNullException(nameof(httpContext));
 
-            wopiRequestHandler = WopiRequestHandler.Empty;
+            var httpRequest = httpContext.Request;
 
             var requestPath = httpRequest.Path;
 
-            if (requestPath.HasValue && requestPath.StartsWithSegments(WOPI_PATH_SEGMENT, StringComparison.OrdinalIgnoreCase))
-            {
-                var accessToken = httpRequest.Query["access_token"].FirstOrDefault();
+            if (!requestPath.IsWopiPath()) return NotAConsumableWopiRequest("The request is not known to be a valid WOPI request path: '{RequestPath}'", requestPath.Value ?? "null");
 
-                if (requestPath.StartsWithSegments(WOPI_FILES_PATH_SEGMENT, StringComparison.OrdinalIgnoreCase))
-                {
-                    wopiRequestHandler = IdentifyFileRequest(httpRequest, accessToken);
-                }
-                else if (requestPath.StartsWithSegments(WOPI_FOLDERS_PATH_SEGMENT, StringComparison.OrdinalIgnoreCase))
-                {
-                    wopiRequestHandler = IdentifyFolderRequest();
-                }
-                else return InvalidWopiRequest("Failed to identify WOPI request.  Endpoint '{RequestPath}' not supported", requestPath);
+            if (requestPath.IsHealthCheck()) return WopiRequestHandler.Empty;
 
-                if (wopiRequestHandler.IsAccessTokenValid()) return THIS_IS_A_VALID_WOPI_FILE_REQUEST;
+            if (requestPath.IsCollaboraTestPage()) return WopiRequestHandler.Empty;
 
-                wopiRequestHandler = WopiRequestHandler.Empty;
+            if (!requestPath.IsWopiFilePath()) return NotAConsumableWopiRequest("Failed to identify WOPI request.  Endpoint '{RequestPath}' not supported", requestPath);
 
-                return InvalidWopiRequest("The access token provided '{AccessToken}' is invalid.   The WOPI request cannot be handled.", accessToken ?? "null");
-            }
-
-            _logger?.LogTrace("Determined the request does not relate to WOPI: '{RequestPath}'", requestPath.Value);
-
-            return THIS_IS_NOT_A_WOPI_FILE_REQUEST;  
+            return await IdentifyFileRequestAsync(httpContext, cancellationToken);           
         }
 
-        private WopiRequestHandler IdentifyFileRequest(HttpRequest httpRequest, string? accessToken)
+        private async Task<WopiRequestHandler> ForbiddenWopiRequestAsync(HttpContext httpContext, CancellationToken cancellationToken)
         {
-            var requestMethod = httpRequest.Method;
+            _logger?.LogError("The request to {RequestPath} could not be authorised.   No valid auth cookie or access_token was found", httpContext.Request.Path);
+
+            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+
+            var msg = $"The request could not be authorised.   Ensure the Cookie header contains an auth token or a valid access_token is presented with the request";
+
+            await httpContext.Response.WriteAsync(msg, cancellationToken);
+
+            return WopiRequestHandler.Empty;
+        }
+
+        private async Task<WopiRequestHandler> IdentifyFileRequestAsync(HttpContext httpContext, CancellationToken cancellationToken)
+        {
+            var httpRequest = httpContext.Request;
 
             var requestPath = httpRequest.Path.Value;
 
-            if (string.IsNullOrWhiteSpace(requestPath)) return WopiRequestHandler.Empty;
-
+            if (string.IsNullOrWhiteSpace(requestPath)) return NotAConsumableWopiRequest("Thre is no request path");
  
-            var fileSegmentOfRequestPath = requestPath?[WOPI_FILES_PATH_SEGMENT.Length..]?.Trim();
+            var fileSegmentOfRequestPath = requestPath[ExtensionMethods.WOPI_FILES_PATH_SEGMENT.Length..]?.Trim();
+
+            var requestMethod = httpRequest.Method;
 
             _logger?.LogTrace("Extracted file segment from request path: '{PathSegment}' for method '{RequestMethod}'", fileSegmentOfRequestPath ?? "null", requestMethod);
             
-            if (string.IsNullOrWhiteSpace(fileSegmentOfRequestPath)) return WopiRequestHandler.Empty;
+            if (string.IsNullOrWhiteSpace(fileSegmentOfRequestPath)) return NotAConsumableWopiRequest("The request path is not correctly formed");
 
             Debug.Assert(fileSegmentOfRequestPath.StartsWith('/'));
 
             fileSegmentOfRequestPath = fileSegmentOfRequestPath[1..];
 
-            Debug.Assert(!string.IsNullOrWhiteSpace(requestPath));
-
-            if (fileSegmentOfRequestPath.EndsWith("/contents"))
+            if (fileSegmentOfRequestPath.EndsWith("/authorise-user"))
             {
-                if (string.IsNullOrWhiteSpace(accessToken)) return WopiRequestHandler.Empty;
-
-                return ConfigureFileContentRequestHandler(httpRequest, requestMethod, requestPath, fileSegmentOfRequestPath, accessToken);
+                return await ConfigureAuthoriseUserRequestHandlerAsync(httpContext, requestPath, requestMethod, fileSegmentOfRequestPath, httpRequest.Query, cancellationToken);
             }
-            else if (fileSegmentOfRequestPath.EndsWith("/authorise-user"))
+            else if (fileSegmentOfRequestPath.EndsWith("/contents"))
             {
-                return ConfigureAuthoriseUserRequestHandler(requestPath, requestMethod, fileSegmentOfRequestPath, httpRequest.Query);
+                return await ConfigureFileContentRequestHandlerAsync(httpContext, requestMethod, requestPath, fileSegmentOfRequestPath, cancellationToken);
             }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(accessToken)) return WopiRequestHandler.Empty;
-
-                return ConfigureCheckFileInfoRequestHandler(requestPath, requestMethod, fileSegmentOfRequestPath, accessToken);
-            }
+          
+            return await ConfigureCheckFileInfoRequestHandlerAsync(httpContext, requestPath, requestMethod, fileSegmentOfRequestPath, cancellationToken);            
         }
 
-        private WopiRequestHandler ConfigureFileContentRequestHandler(HttpRequest httpRequest, string requestMethod, string requestPath, string fileSegmentOfRequestPath, string accessToken)
+        private async Task<WopiRequestHandler> ConfigureFileContentRequestHandlerAsync(HttpContext httpContext, string requestMethod, string requestPath, string fileSegmentOfRequestPath, CancellationToken cancellationToken)
         {
-            var fileId = fileSegmentOfRequestPath.Substring(0, fileSegmentOfRequestPath.Length - "/contents".Length)?.Trim() ?? "null";
+            var fileId = fileSegmentOfRequestPath[..^"/contents".Length]?.Trim();
 
             _logger?.LogTrace("Identified 'contents' request.  File Id extracted from url is: '{FileId}'", fileId);
 
-            if (string.IsNullOrWhiteSpace(fileId)) return WopiRequestHandler.Empty;
+            if (string.IsNullOrWhiteSpace(fileId)) return NotAConsumableWopiRequest("The file id is missing from the /contents request");
 
             // NB - Collabora have not implemented support for the X-WOPI-ItemVersion header and so the Version field set in the 
             //      CheckFileInfo response does not flow through to those endpoints where it is optional - eg GetFile.
             //      This unfortunately means we have to do some crazy workaround using the fileId, and thus use that to derive 
             //      the relevant metadata needed for us to operate correctly.  Hopefully this will prove to be just a temporary
-            //      workaround
+            //      workaround until Collabora complete the necessary work or we can submit a PR to them
+
+            var httpRequest = httpContext.Request;
 
             var fileVersion = httpRequest.Headers["X-WOPI-ItemVersion"].FirstOrDefault();
 
             var file = File.FromId(fileId, fileVersion);
 
+            var authenticatedUser = await _userAuthenticationService.GetForFileContextAsync(httpContext, file, cancellationToken);
+
+            if (authenticatedUser is null) return await ForbiddenWopiRequestAsync(httpContext, cancellationToken);
+
+            if (authenticatedUser.FileMetadata is null) return NotAConsumableWopiRequest("The user file metadata could not be verified.  Likely cause is the request does not contain a valid access_token but does have an authentication cookie");
+
+            if (file != authenticatedUser.FileMetadata.AsFile()) return NotAConsumableWopiRequest("The file associated with the request does not match the file that the user has been authorised to access");
+
             if (0 == string.Compare("GET", requestMethod, StringComparison.OrdinalIgnoreCase))
             {
                 _logger?.LogTrace("Identified this to be a WOPI 'Get File' request");
 
-                var isEphemeralRedirect = bool.Parse(httpRequest.Query["ephemeral_redirect"].FirstOrDefault() ?? bool.FalseString);
-
-                if (isEphemeralRedirect) return RedirectToFileStoreRequestHandler.With(file, accessToken);
-
-                return GetFileWopiRequestHandler.With(file, accessToken);
+                return GetFileWopiRequestHandler.With(authenticatedUser, file);
             }
             else if (0 == string.Compare("POST", requestMethod, StringComparison.OrdinalIgnoreCase))
             {
@@ -145,50 +140,68 @@ namespace FutureNHS.WOPIHost
 
                 Debug.Assert(!string.IsNullOrWhiteSpace(file.Name));
 
-                return PostFileWopiRequestHandler.With(file.Name, accessToken);
+                return PostFileWopiRequestHandler.With(file.Name);
             }
-            else _logger?.LogTrace("The request method '{RequestMethod}' is not supported for path '{RequestPath}'", requestMethod, requestPath ?? "null");
 
-            return WopiRequestHandler.Empty;
+            return NotAConsumableWopiRequest("The request method '{RequestMethod}' is not supported for path '{RequestPath}'", requestMethod, requestPath ?? "null");
         }
 
-        private  WopiRequestHandler ConfigureAuthoriseUserRequestHandler(string requestPath, string requestMethod, string fileSegmentOfRequestPath, IQueryCollection query)
+        private async Task<WopiRequestHandler> ConfigureAuthoriseUserRequestHandlerAsync(HttpContext httpContext, string requestPath, string requestMethod, string fileSegmentOfRequestPath, IQueryCollection query, CancellationToken cancellationToken)
         {
             var fileId = fileSegmentOfRequestPath.Replace("/authorise-user", string.Empty);
 
-            _logger?.LogTrace("File Id extracted from url is: '{FileId}'.  Attempting to identity permission type", fileId ?? "null");
+            _logger?.LogTrace("File Id extracted from url is: '{FileId}'.  Attempting to identify permission type", fileId ?? "null");
 
-            if (string.IsNullOrWhiteSpace(fileId)) return WopiRequestHandler.Empty;
-
-            var permission =
-                0 == string.Compare(query["permission"], "edit", StringComparison.OrdinalIgnoreCase)
-                ? PostAuthoriseUserRequestHandler.FileAccessPermissions.Edit
-                : PostAuthoriseUserRequestHandler.FileAccessPermissions.View;
-
-            _logger?.LogTrace("Permission type extracted from url query is: '{Permission}'.  Attempting to identity request type", permission);
+            if (string.IsNullOrWhiteSpace(fileId)) return NotAConsumableWopiRequest("The file id is missing from the /authorise-user request");
 
             if (0 == string.Compare("POST", requestMethod, StringComparison.OrdinalIgnoreCase))
             {
                 // This isn't actually part of the WOPI specification; more a customisation we're making to get the endpoint for the WOPI host
                 // from where the file can be viewed/edited, and an access_token it can pass back to us when requesting the same
 
-                // TODO - Need to send the auth cookie across to MVCForum to authenticate (when it can do so).  It will return the user details that we can then 
-                //        consider when we add authorisation to file requests.   In the meantime, we'll just send back a random token
+                _logger?.LogTrace("Identified this to be a POST /authorise-user' request");
 
-                _logger?.LogTrace("Identified this to be an 'Authorise User' request");
-                
-                var userAuthToken = Guid.NewGuid().ToString().ToLowerInvariant().Replace("-", string.Empty);
+                var file = File.FromId(fileId);
 
-                return PostAuthoriseUserRequestHandler.With(userAuthToken, permission, fileId);
+                var authenticatedUser = await _userAuthenticationService.GetForFileContextAsync(httpContext, file, cancellationToken);
+
+                if (authenticatedUser is null) return await ForbiddenWopiRequestAsync(httpContext, cancellationToken);
+
+                // If the file metadata is known, it is because the access_token has been provided to this request.  Check it is 
+                // tied to the same file that we need a new token for, else consider the request malformed.
+                // If it is the same file, grab the metadata again just to verify user file permissions haven't changed and the file
+                // is still active on the site
+
+                if (authenticatedUser.FileMetadata is not null && authenticatedUser.FileMetadata.AsFile() != file)
+                {
+                    _logger?.LogCritical("An access_token has been provided that was verified to be valid, however it is not for the file that the requestor is trying to authorise.  This could be an attempt to hijack credentials");
+
+                    return NotAConsumableWopiRequest("Only supply an access_token to authenticate requests specific to the previously authorised file");
+                }
+
+                var userFileMetadata = await _userFileMetadataProvider.GetForFileAsync(file, authenticatedUser, cancellationToken);
+
+                if (userFileMetadata is null) return NotAConsumableWopiRequest("The user file metadata could not be retrieved");
+
+                var permission = 0 == string.Compare(query["permission"], "edit", StringComparison.OrdinalIgnoreCase)
+                    ? FileAccessPermission.Edit
+                    : FileAccessPermission.View;
+
+                _logger?.LogTrace("Permission type extracted from url query is: '{Permission}'.  Attempting to identity request type", permission);
+
+                authenticatedUser = authenticatedUser with { FileMetadata = userFileMetadata };
+
+                return AuthoriseUserRequestHandler.With(authenticatedUser, permission, file);
             }
-            else _logger?.LogWarning("The request method '{RequestMethod}' is not supported for path '{RequestPath}", requestMethod, requestPath);
 
-            return WopiRequestHandler.Empty;
+            return NotAConsumableWopiRequest("The request method '{RequestMethod}' is not supported for path '{RequestPath}", requestMethod, requestPath);
         }
 
-        private WopiRequestHandler ConfigureCheckFileInfoRequestHandler(string requestPath, string requestMethod, string fileId, string accessToken)
+        private async Task<WopiRequestHandler> ConfigureCheckFileInfoRequestHandlerAsync(HttpContext httpContext, string requestPath, string requestMethod, string fileSegmentOfRequestPath, CancellationToken cancellationToken)
         {
-            _logger?.LogTrace("File Id extracted from url is: '{FileId}'.  Attempting to identity request type", fileId);
+            var fileId = fileSegmentOfRequestPath;
+
+            _logger?.LogTrace("File Id extracted from url is: '{FileId}'", fileId);
 
             if (0 == string.Compare("GET", requestMethod, StringComparison.OrdinalIgnoreCase))
             {
@@ -196,16 +209,24 @@ namespace FutureNHS.WOPIHost
 
                 var file = (File)fileId;
 
-                return CheckFileInfoWopiRequestHandler.With(file, accessToken, _features);
-            }
-            else _logger?.LogWarning("The request method '{RequestMethod}' is not supported for path '{RequestPath}", requestMethod, requestPath ?? "null");
+                var authenticatedUser = await _userAuthenticationService.GetForFileContextAsync(httpContext, file, cancellationToken);
 
+                if (authenticatedUser is null) return await ForbiddenWopiRequestAsync(httpContext, cancellationToken);
+
+                return CheckFileInfoWopiRequestHandler.With(authenticatedUser, file, _features);
+            }
+
+            return NotAConsumableWopiRequest("The request method '{RequestMethod}' is not supported for path '{RequestPath}", requestMethod, requestPath);
+        }
+
+#pragma warning disable CA2254 // Template should be a static expression
+        private WopiRequestHandler NotAConsumableWopiRequest(string message, params object[] args) 
+        {
+            _logger?.LogWarning(message, args);
+            
             return WopiRequestHandler.Empty;
         }
+#pragma warning restore CA2254 // Template should be a static expression
 
-        private static WopiRequestHandler IdentifyFolderRequest()
-        {
-            return WopiRequestHandler.Empty;  // Not supported
-        }
     }
 }

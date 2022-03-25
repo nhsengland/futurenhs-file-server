@@ -33,7 +33,7 @@ namespace FutureNHS_WOPI_Host_UnitTests.PlatformHelpers
 
             var policyKey = Guid.NewGuid().ToString();
 
-            var globalResiliencyPolicy = AzureSqlClient.GetAsyncGlobalResiliencyPolicyFor(policyKey);
+            var globalResiliencyPolicy = azureSqlClient.GetAsyncGlobalResiliencyPolicyFor(policyKey);
 
             var policy = Policy.WrapAsync(retryPolicy, globalResiliencyPolicy);
 
@@ -205,7 +205,13 @@ namespace FutureNHS_WOPI_Host_UnitTests.PlatformHelpers
         [TestMethod]
         public void ResiliencyPolicy_BulkheadQueuesExcessLoadAndThrowsOutOldersWorkWhenTooMuchInQueue()
         {
-            var policy = AzureSqlClient.GetAsyncBulkheadPolicy();
+            var logger = new Moq.Mock<ILogger<AzureSqlClient>>();
+
+            var azureSqlDbConnectionFactory = new Moq.Mock<IAzureSqlDbConnectionFactory>();
+
+            var azureSqlClient = new AzureSqlClient(azureSqlDbConnectionFactory.Object, logger.Object);
+
+            var policy = azureSqlClient.GetAsyncBulkheadPolicy();
 
             // Bulkhead is configured for a max concurrent rate of 3 with max queue size of 25
             // In this test we will prevent all tasks from completing apart from the first, thus we should expect to see 

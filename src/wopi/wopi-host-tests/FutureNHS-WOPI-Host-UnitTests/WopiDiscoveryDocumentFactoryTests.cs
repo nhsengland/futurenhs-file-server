@@ -154,7 +154,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + WopiDiscoveryDocumentTests.WOPI_DISCOVERY_DOCUMENT_URL, UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 

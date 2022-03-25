@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FutureNHS_WOPI_Host_UnitTests
 {
@@ -13,311 +15,395 @@ namespace FutureNHS_WOPI_Host_UnitTests
     {
         [TestMethod]
         [ExpectedException(typeof(ArgumentNullException))]
+        public void Ctor_ThrowsIfUserAuthenticationServiceIsNull()
+        {
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
+            var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
+
+            snapshot.SetupGet(x => x.Value).Returns(new Features());
+
+            _ = new WopiRequestHandlerFactory(userAuthenticationService: default, userFileMetadataProvider.Object, features: snapshot.Object);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentNullException))]
+        public void Ctor_ThrowsIfUserFileMetadataProviderIsNull()
+        {
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
+
+            snapshot.SetupGet(x => x.Value).Returns(new Features());
+
+            _ = new WopiRequestHandlerFactory(userAuthenticationService: userAuthenticationService.Object, userFileMetadataProvider: default, features: snapshot.Object);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentNullException))]
         public void Ctor_ThrowsIfFeaturesOptionsConfigurationIsNull()
         {
-            _ = new WopiRequestHandlerFactory(features: default);
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            _ = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: default);
         }
 
         [TestMethod]
         [ExpectedException(typeof(ArgumentNullException))]
         public void Ctor_ThrowsIfFeaturesConfigurationIsNull()
         {
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(default(Features));
 
-            _ = new WopiRequestHandlerFactory(features: snapshot.Object);
+            _ = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
         }
 
 
 
         [TestMethod]
         [ExpectedException(typeof(ArgumentNullException))]
-        public void CreateRequest_ThrowsIfHttpRequestIsNull()
+        public async Task CreateRequestHandlerAsync_ThrowsIfHttpContextIsNull()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
 
-            _ = wopiRequestFactory.TryCreateRequestHandler(request: default, out _);
+            _ = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext: default, cancellationToken);
         }
 
         [TestMethod]
-        public void CreateRequest_NoneWopiRequestIsIdentifiedAndIgnored()
+        public async Task CreateRequestHandlerAsync_NoneWopiRequestIsIdentifiedAndIgnored()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
 
             var httpContext = new DefaultHttpContext();
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
-            Assert.IsFalse(createdOk);
-
-            Assert.IsNotNull(wopiRequest);
+            Assert.IsNotNull(wopiRequestHandler);
             
-            Assert.IsTrue(wopiRequest.IsEmpty, "Expected a none WOPI request to be ignored and return an empty marker");
+            Assert.IsTrue(wopiRequestHandler.IsEmpty, "Expected a none WOPI request to be ignored and return an empty marker");
         }
 
         [TestMethod]
-        public void CreateRequest_WopiRequestWithMissingAccessTokenIsIdentifiedAndIgnored()
+        public async Task CreateRequestHandlerAsync_WopiRequestWithMissingAccessTokenIsIdentifiedAndIgnored()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
+
+            var file = File.FromId("file-name|file-version");
 
             var httpContext = new DefaultHttpContext();
 
             var httpRequest = httpContext.Request;
 
             httpRequest.Method = HttpMethods.Get;
-            httpRequest.Path = "/wopi/files/file-name|file-version";
+            httpRequest.Path = $"/wopi/files/{file.Id}";
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(httpContext, file, cancellationToken)).Returns(Task.FromResult(default(AuthenticatedUser)));
 
-            Assert.IsFalse(createdOk);
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
-            Assert.IsNotNull(wopiRequest);
+            Assert.IsNotNull(wopiRequestHandler);
 
-            Assert.IsTrue(wopiRequest.IsEmpty, "Expected a WOPI request with a missing access token to be ignored and return an empty marker");
+            Assert.IsTrue(wopiRequestHandler.IsEmpty, "Expected a WOPI request with a missing access token to be ignored and return an empty marker");
         }
 
         [TestMethod]
-        public void CreateRequest_WopiRequestWithInvalidAccessTokenIsIdentifiedAndIgnored()
+        public async Task CreateRequesHandlert_WopiRequestWithInvalidAccessTokenIsIdentifiedAndIgnored()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
+
+            var file = File.FromId("file-name|file-version");
 
             var httpContext = new DefaultHttpContext();
 
             var httpRequest = httpContext.Request;
 
             httpRequest.Method = HttpMethods.Get;
-            httpRequest.Path = "/wopi/files/file-name|file-version";
+            httpRequest.Path = $"/wopi/files/{file.Id}";
             httpRequest.QueryString = new QueryString("?access_token=");
 
-            httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
+            httpRequest.Headers["X-WOPI-ItemVersion"] = file.Version;
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(httpContext, file, cancellationToken)).Returns(Task.FromResult(default(AuthenticatedUser)));
 
-            Assert.IsFalse(createdOk);
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
-            Assert.IsNotNull(wopiRequest);
+            Assert.IsNotNull(wopiRequestHandler);
 
-            Assert.IsTrue(wopiRequest.IsEmpty, "Expected a WOPI request with an invalid access token to be ignored and return an empty marker");
+            Assert.IsTrue(wopiRequestHandler.IsEmpty, "Expected a WOPI request with an invalid access token to be ignored and return an empty marker");
         }
 
         [TestMethod]
-        public void CreateRequest_IdentifiesCheckFileInfoRequest()
+        public async Task CreateRequestHandlerAsync_IdentifiesCheckFileInfoRequest()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
+
+            var file = File.FromId("file-name|file-version");
 
             var httpContext = new DefaultHttpContext();
 
             var httpRequest = httpContext.Request;
 
             httpRequest.Method = HttpMethods.Get;
-            httpRequest.Path = "/wopi/files/file-name|file-version";
-            httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>");
+            httpRequest.Path = $"/wopi/files/{file.Id}";
+            httpRequest.QueryString = new QueryString("?access_token=9747f3e6-c18d-47b5-bd86-56899cbf9d4a");
 
-            httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
+            httpRequest.Headers["X-WOPI-ItemVersion"] = file.Version;
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            var authenticatedUser = new AuthenticatedUser(Guid.Parse("9747f3e6-c18d-47b5-bd86-56899cbf9d4a"), default);
 
-            Assert.IsTrue(createdOk);
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(httpContext, file, cancellationToken)).Returns(Task.FromResult(authenticatedUser));
 
-            Assert.IsNotNull(wopiRequest);
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
-            Assert.IsInstanceOfType(wopiRequest, typeof(CheckFileInfoWopiRequestHandler), "Expected Check File Info requests to be identified");
+            Assert.IsNotNull(wopiRequestHandler);
 
-            var checkFileInfoRequest = (CheckFileInfoWopiRequestHandler)wopiRequest;
-
-            Assert.AreEqual("<valid-access-token>", checkFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
+            Assert.IsInstanceOfType(wopiRequestHandler, typeof(CheckFileInfoWopiRequestHandler), "Expected Check File Info requests to be identified");
         }
 
         [TestMethod]
-        public void CreateRequest_IdentifiesGetFileRequest()
+        public async Task CreateRequestHandlerAsync_IdentifiesGetFileRequest()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
+            var fileMetadata = new UserFileMetadata() { 
+                 FileId = Guid.NewGuid(),
+                 Title = "title",
+                 Description = "description",
+                 GroupName = "groupName",
+                 FileVersion = "version",
+                 OwnerUserName = "owner",
+                 Name = "name",
+                 Extension = ".ext",
+                 SizeInBytes = 1,
+                 BlobName = Guid.NewGuid().ToString() + ".ext",
+                 LastWriteTimeUtc = DateTimeOffset.UtcNow.AddDays(-1),
+                 ContentHash = Convert.FromBase64String("aGFzaA == "),
+                 UserHasViewPermission = true,
+                 UserHasEditPermission = false
+                 };
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var authenticatedUser = new AuthenticatedUser(Guid.NewGuid(), default) { FileMetadata = fileMetadata };
+
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(Moq.It.IsAny<HttpContext>(), Moq.It.IsAny<File>(), Moq.It.IsAny<CancellationToken>())).Returns(Task.FromResult(authenticatedUser));
+
+            userFileMetadataProvider.Setup(x => x.GetForFileAsync(fileMetadata.AsFile(), authenticatedUser, cancellationToken)).Returns(Task.FromResult(fileMetadata));
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
+
+            var file = fileMetadata.AsFile();
 
             var httpContext = new DefaultHttpContext();
 
             var httpRequest = httpContext.Request;
 
             httpRequest.Method = HttpMethods.Get;
-            httpRequest.Path = "/wopi/files/file-name|file-version/contents";
-            httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>");
+            httpRequest.Path = $"/wopi/files/{file.Id}/contents";
+            httpRequest.QueryString = new QueryString("?access_token=9747f3e6-c18d-47b5-bd86-56899cbf9d4a");
 
-            httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
+            httpRequest.Headers["X-WOPI-ItemVersion"] = file.Version;
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(httpContext, file, cancellationToken)).Returns(Task.FromResult(authenticatedUser));
 
-            Assert.IsTrue(createdOk);
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
-            Assert.IsNotNull(wopiRequest);
+            Assert.IsNotNull(wopiRequestHandler);
 
-            Assert.IsInstanceOfType(wopiRequest, typeof(GetFileWopiRequestHandler), "Expected Get File requests to be identified");
-
-            var getFileInfoRequest = (GetFileWopiRequestHandler)wopiRequest;
-
-            Assert.AreEqual("<valid-access-token>", getFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
+            Assert.IsInstanceOfType(wopiRequestHandler, typeof(GetFileWopiRequestHandler), "Expected Get File requests to be identified");
         }
 
         [TestMethod]
-        public void CreateRequest_IdentifiesEphemeralRedirectRequest()
+        public async Task CreateRequestHandlerAsync_IdentifiesSaveFileRequest()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
+            var fileMetadata = new UserFileMetadata() {
+                 FileId = Guid.NewGuid(),
+                 Title = "title",
+                 Description = "description",
+                 GroupName = "groupName",
+                 FileVersion = "version",
+                 OwnerUserName = "owner",
+                 Name = "name",
+                 Extension = ".ext",
+                 SizeInBytes = 1,
+                 BlobName = Guid.NewGuid().ToString() + ".ext",
+                 LastWriteTimeUtc = DateTimeOffset.UtcNow.AddDays(-1),
+                 ContentHash = Convert.FromBase64String("aGFzaA == "),
+                 UserHasViewPermission = true,
+                 UserHasEditPermission = false
+                 };
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var authenticatedUser = new AuthenticatedUser(Guid.NewGuid(), default) { FileMetadata = fileMetadata };
+
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(Moq.It.IsAny<HttpContext>(), Moq.It.IsAny<File>(), Moq.It.IsAny<CancellationToken>())).Returns(Task.FromResult(authenticatedUser));
+
+            userFileMetadataProvider.Setup(x => x.GetForFileAsync(fileMetadata.AsFile(), authenticatedUser, cancellationToken)).Returns(Task.FromResult(fileMetadata));
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
 
-            var httpContext = new DefaultHttpContext();
-
-            var httpRequest = httpContext.Request;
-
-            httpRequest.Method = HttpMethods.Get;
-            httpRequest.Path = "/wopi/files/file-name|file-version/contents";
-            httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>&ephemeral_redirect=true");
-
-            httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
-
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
-
-            Assert.IsTrue(createdOk);
-
-            Assert.IsNotNull(wopiRequest);
-
-            Assert.IsInstanceOfType(wopiRequest, typeof(RedirectToFileStoreRequestHandler), "Expected Redirect to File Store requests to be identified");
-
-            var getFileInfoRequest = (RedirectToFileStoreRequestHandler)wopiRequest;
-
-            Assert.AreEqual("<valid-access-token>", getFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
-        }
-
-        [TestMethod]
-        public void CreateRequest_IdentifiesSaveFileRequest()
-        {
-            var features = new Features();
-
-            var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
-
-            snapshot.SetupGet(x => x.Value).Returns(features);
-
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            var file = fileMetadata.AsFile();
 
             var httpContext = new DefaultHttpContext();
 
             var httpRequest = httpContext.Request;
 
             httpRequest.Method = HttpMethods.Post;
-            httpRequest.Path = "/wopi/files/file-name|file-version/contents";
-            httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>");
+            httpRequest.Path = $"/wopi/files/{file.Id}/contents";
+            httpRequest.QueryString = new QueryString("?access_token=9747f3e6-c18d-47b5-bd86-56899cbf9d4a");
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(httpContext, file, cancellationToken)).Returns(Task.FromResult(authenticatedUser));
 
-            Assert.IsTrue(createdOk);
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
-            Assert.IsNotNull(wopiRequest);
+            Assert.IsNotNull(wopiRequestHandler);
 
-            Assert.IsInstanceOfType(wopiRequest, typeof(PostFileWopiRequestHandler), "Expected Save File requests to be identified");
-
-            var postFileInfoRequest = (PostFileWopiRequestHandler)wopiRequest;
-
-            Assert.AreEqual("<valid-access-token>", postFileInfoRequest.AccessToken, "Expected the access token to be extracted and retained");
+            Assert.IsInstanceOfType(wopiRequestHandler, typeof(PostFileWopiRequestHandler), "Expected Save File requests to be identified");
         }
 
         [TestMethod]
-        public void CreateRequest_IdentifiesAuthUserRequest()
+        public async Task CreateRequestHandlerAsync_IdentifiesAuthUserRequest()
         {
+            var cancellationToken = CancellationToken.None;
+
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var authenticatedUser = new AuthenticatedUser(Guid.NewGuid(), default);
+
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(Moq.It.IsAny<HttpContext>(), Moq.It.IsAny<File>(), Moq.It.IsAny<CancellationToken>())).Returns(Task.FromResult(authenticatedUser));
+
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
+
+            var fileMetadata = new UserFileMetadata() {
+                FileId = Guid.NewGuid(),
+                Title = "title",
+                Description = "description",
+                GroupName = "groupName",
+                FileVersion = "version",
+                OwnerUserName = "owner",
+                Name = "name",
+                Extension = ".ext",
+                SizeInBytes = 1,
+                BlobName = Guid.NewGuid().ToString() + ".ext",
+                LastWriteTimeUtc = DateTimeOffset.UtcNow.AddDays(-1),
+                ContentHash = Convert.FromBase64String("aGFzaA == "),
+                UserHasViewPermission = true,
+                UserHasEditPermission = false
+                };
+
+            userFileMetadataProvider.Setup(x => x.GetForFileAsync(fileMetadata.AsFile(), authenticatedUser, cancellationToken)).Returns(Task.FromResult(fileMetadata));
+
             var features = new Features();
 
             var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
+
+            var file = fileMetadata.AsFile();
 
             var httpContext = new DefaultHttpContext();
 
             var httpRequest = httpContext.Request;
 
             httpRequest.Method = HttpMethods.Post;
-            httpRequest.Path = "/wopi/files/file-name|file-version/authorise-user";
+            httpRequest.Path = $"/wopi/files/{file.Id}/authorise-user";
             httpRequest.QueryString = new QueryString("?permission=view");
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(httpContext, file, cancellationToken)).Returns(Task.FromResult(authenticatedUser));
 
-            Assert.IsTrue(createdOk);
-
-            Assert.IsNotNull(wopiRequest);
-
-            Assert.IsInstanceOfType(wopiRequest, typeof(PostAuthoriseUserRequestHandler), "Expected Authorise User requests to be identified");
-
-            var postAuthoriseUserRequestHandler = (PostAuthoriseUserRequestHandler)wopiRequest;
-
-            Assert.IsNotNull(postAuthoriseUserRequestHandler.AccessToken, "Expected the access token to be created for the user");
-            Assert.AreEqual(PostAuthoriseUserRequestHandler.FileAccessPermissions.View, postAuthoriseUserRequestHandler.Permission, "Expected the user to be granted view permissions");
-        }
-
-        [TestMethod]
-        public void CreateRequest_IdentifiesAndIgnoresFolderRequest()
-        {
-            var features = new Features();
-
-            var snapshot = new Moq.Mock<IOptionsSnapshot<Features>>();
-
-            snapshot.SetupGet(x => x.Value).Returns(features);
-
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
-
-            var httpContext = new DefaultHttpContext();
-
-            var httpRequest = httpContext.Request;
-
-            httpRequest.Method = HttpMethods.Post;
-            httpRequest.Path = "/wopi/folders/";
-            httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>");
-
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
-
-            Assert.IsFalse(createdOk);
+            var wopiRequest = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
             Assert.IsNotNull(wopiRequest);
 
-            Assert.IsTrue(wopiRequest.IsEmpty, "Expected folder based requests to be ignored");
+            Assert.IsInstanceOfType(wopiRequest, typeof(AuthoriseUserRequestHandler), "Expected Authorise User requests to be identified");
         }
     }
 }

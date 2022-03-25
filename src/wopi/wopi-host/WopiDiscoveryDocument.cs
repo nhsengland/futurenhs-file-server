@@ -16,7 +16,7 @@ namespace FutureNHS.WOPIHost
 
     internal sealed class WopiDiscoveryDocument : IWopiDiscoveryDocument
     {
-        internal static readonly WopiDiscoveryDocument Empty = new WopiDiscoveryDocument();
+        internal static readonly WopiDiscoveryDocument Empty = new();
 
         private readonly Uri? _sourceEndpoint;
         private readonly XDocument? _xml;
@@ -97,7 +97,7 @@ namespace FutureNHS.WOPIHost
 
             if (IsEmpty) throw new WopiDiscoveryDocumentEmptyException();
 
-            Debug.Assert(_xml is object);
+            Debug.Assert(_xml is not null);
 
             if (string.IsNullOrWhiteSpace(fileExtension)) return default;
             if (string.IsNullOrWhiteSpace(fileAction)) return default;
@@ -197,7 +197,7 @@ namespace FutureNHS.WOPIHost
                 }
                 else if (0 == n)
                 {
-                    urlSrc = urlSrc.Substring(0, "=PLACEHOLDER_VALUE[&]>".Length);
+                    urlSrc = urlSrc[.."=PLACEHOLDER_VALUE[&]>".Length];
                 }
                 else
                 { 

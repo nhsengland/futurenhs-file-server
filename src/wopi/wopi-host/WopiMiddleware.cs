@@ -26,17 +26,12 @@ namespace FutureNHS.WOPIHost
 
             var isWopiRequest = await ProcessRequest(httpContext);
 
-            if (_next is null) return;
-
-            // TODO
-            // Not exactly sure what to do to avoid an error being thrown here.  Presume it is to do with injecting the 
-            // middleware in the wrong place but doesn't appear to be any actual side effects.  
-            // The next item is the routing middleware and it causes an InvalidOperationException because we've already set
-            // the return status code.  Need to investigate whether I've configured something wrong, or if the expected 
-            // behaviour for middleware is to not execute the next item if it handles the request.  For now, if we handled 
-            // the WOPI request then not sure what downstream middleware actually needs to execute so just going to return
-
             if (isWopiRequest) return;
+
+            if (httpContext.Response.HasStarted) return;
+            if (httpContext.Response.StatusCode != StatusCodes.Status200OK) return;
+
+            if (_next is null) return;
 
             await _next.Invoke(httpContext);
         }
@@ -49,8 +44,8 @@ namespace FutureNHS.WOPIHost
         /// <returns>true if it was identified and handled, else false</returns>
         private static async Task<bool> ProcessRequest(HttpContext httpContext)
         {
-            const bool THIS_IS_A_WOPI_REQUEST = true;
-            const bool THIS_IS_NOT_A_WOPI_REQUEST = false;
+            const bool THIS_IS_A_VALID_WOPI_REQUEST = true;
+            const bool THIS_IS_NOT_A_VALID_WOPI_REQUEST = false;
 
             var cancellationToken = httpContext.RequestAborted;
 
@@ -60,12 +55,15 @@ namespace FutureNHS.WOPIHost
 
             var wopiRequestFactory = httpContext.RequestServices.GetRequiredService<IWopiRequestHandlerFactory>();
 
-            if (!wopiRequestFactory.TryCreateRequestHandler(httpContext.Request, out var wopiRequestHandler)) return THIS_IS_NOT_A_WOPI_REQUEST;
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
 
-            Debug.Assert(!wopiRequestHandler.IsEmpty);
+            if (wopiRequestHandler.IsEmpty) return THIS_IS_NOT_A_VALID_WOPI_REQUEST;
+
             Debug.Assert(wopiRequestHandler.DemandsProof.HasValue);
 
             logger?.LogTrace($"Looks like a WOPI request so going to try and route it to the correct handler");
+
+            // TODO - Refactor for SRP and push to a delegate to verify the proof
 
             if (wopiRequestHandler.DemandsProof.Value)
             {
@@ -92,7 +90,7 @@ namespace FutureNHS.WOPIHost
 
             await wopiRequestHandler.HandleAsync(httpContext, cancellationToken);
 
-            return THIS_IS_A_WOPI_REQUEST;
+            return THIS_IS_A_VALID_WOPI_REQUEST;
         }
 
         //private sealed class WopiHeaders

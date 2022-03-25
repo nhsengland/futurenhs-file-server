@@ -36,9 +36,8 @@ namespace FutureNHS_WOPI_Host_UnitTests
         [ExpectedException(typeof(OperationCanceledException))]
         public async Task HandleAsync_ThrowsWhenCancellationTokenCancelled()
         {
-            using var cts = new CancellationTokenSource();
-
-            cts.Cancel();
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+            var userFileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
 
             var features = new Features();
 
@@ -46,23 +45,33 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             snapshot.SetupGet(x => x.Value).Returns(features);
 
-            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(features: snapshot.Object);
+            IWopiRequestHandlerFactory wopiRequestFactory = new WopiRequestHandlerFactory(userAuthenticationService.Object, userFileMetadataProvider.Object, features: snapshot.Object);
+
+            var file = File.FromId("file-name|file-version");
 
             var httpContext = new DefaultHttpContext();
 
             var httpRequest = httpContext.Request;
 
             httpRequest.Method = HttpMethods.Get;
-            httpRequest.Path = "/wopi/files/file-name|file-version";
-            httpRequest.QueryString = new QueryString("?access_token=<valid-access-token>");
+            httpRequest.Path = $"/wopi/files/{file.Id}";
+            httpRequest.QueryString = new QueryString("?access_token=9747f3e6-c18d-47b5-bd86-56899cbf9d4a");
 
-            httpRequest.Headers["X-WOPI-ItemVersion"] = "file-version";
+            httpRequest.Headers["X-WOPI-ItemVersion"] = file.Version;
 
-            var createdOk = wopiRequestFactory.TryCreateRequestHandler(request: httpContext.Request, out var wopiRequest);
+            var authenticatedUser = new AuthenticatedUser(Guid.Parse("9747f3e6-c18d-47b5-bd86-56899cbf9d4a"), default);
 
-            Assert.IsTrue(createdOk);
+            using var cts = new CancellationTokenSource();
 
-            await wopiRequest.HandleAsync(httpContext, cts.Token);
+            var cancellationToken = cts.Token;
+
+            userAuthenticationService.Setup(x => x.GetForFileContextAsync(httpContext, file, cancellationToken)).Returns(Task.FromResult(authenticatedUser));
+
+            var wopiRequestHandler = await wopiRequestFactory.CreateRequestHandlerAsync(httpContext, cancellationToken);
+
+            cts.Cancel();
+
+            await wopiRequestHandler.HandleAsync(httpContext, cancellationToken);
         }
     }
 }

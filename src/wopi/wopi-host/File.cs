@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text.Json.Serialization;
 
 namespace FutureNHS.WOPIHost
 {
@@ -8,29 +9,29 @@ namespace FutureNHS.WOPIHost
         internal const int FILENAME_MAXIMUM_LENGTH = 100;
         internal const int FILENAME_MINIMUM_LENGTH = 4;
 
-        private File(string fileName, string? fileVersion)
+        [JsonConstructor]
+
+        public File(string name, string? version)
         {
-            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentNullException(nameof(fileName));
+            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
 
-            fileName = fileName.Trim();
-            fileVersion = fileVersion?.Trim();
+            name = name.Trim();
+            version = version?.Trim();
 
-            if (FILENAME_MAXIMUM_LENGTH < fileName.Length) throw new ArgumentOutOfRangeException(nameof(fileName), $"Maximum allowed filename length is {FILENAME_MAXIMUM_LENGTH} characters");
-            if (FILENAME_MINIMUM_LENGTH > fileName.Length) throw new ArgumentOutOfRangeException(nameof(fileName), $"Minimum allowed filename length is {FILENAME_MINIMUM_LENGTH} characters");
+            if (FILENAME_MAXIMUM_LENGTH < name.Length) throw new ArgumentOutOfRangeException(nameof(name), $"Maximum allowed filename length is {FILENAME_MAXIMUM_LENGTH} characters");
+            if (FILENAME_MINIMUM_LENGTH > name.Length) throw new ArgumentOutOfRangeException(nameof(name), $"Minimum allowed filename length is {FILENAME_MINIMUM_LENGTH} characters");
 
-            Name = fileName;
-            Version = fileVersion;
-
-            Id = string.IsNullOrWhiteSpace(fileVersion) ? fileName : string.Concat(fileName, '|', fileVersion);
+            Name = name;
+            Version = version;
         }
 
-        public static File EMPTY { get; } = new File();
+        [JsonIgnore] public static File Empty { get; } = new File();
 
-        public string? Id { get; }
-        public string? Name { get; }
-        public string? Version { get; }
+        [JsonIgnore] public string? Id => string.IsNullOrWhiteSpace(Version) ? Name : string.Concat(Name, '|', Version);
+        [JsonInclude] public string? Name { get; }
+        [JsonInclude] public string? Version { get; }
 
-        public bool IsEmpty => string.IsNullOrWhiteSpace(Name) && string.IsNullOrWhiteSpace(Version);
+        [JsonIgnore] public bool IsEmpty => string.IsNullOrWhiteSpace(Name) && string.IsNullOrWhiteSpace(Version);
 
         public static File With(string fileName, string fileVersion)
         {
@@ -43,7 +44,7 @@ namespace FutureNHS.WOPIHost
             // the WOPI client fully supported the versioning protocol.   The optional parameter is the value taken 
             // from the header if it exists.
 
-            if (string.IsNullOrWhiteSpace(id)) return EMPTY;
+            if (string.IsNullOrWhiteSpace(id)) return Empty;
 
             var segments = id.Split('|', StringSplitOptions.RemoveEmptyEntries);
 
@@ -53,7 +54,7 @@ namespace FutureNHS.WOPIHost
 
             if (string.IsNullOrWhiteSpace(fileVersion)) fileVersion = fileVersionFromId;
 
-            if (string.IsNullOrWhiteSpace(fileName)) return EMPTY;
+            if (string.IsNullOrWhiteSpace(fileName)) return Empty;
 
             if (fileVersionFromId is not null && fileVersion is not null && !fileVersion.Equals(fileVersionFromId, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"The file version taken from the X-WOPI-ItemVersion header '{fileVersion}' differs from the version encoded in the file id '{fileVersionFromId}'");
 

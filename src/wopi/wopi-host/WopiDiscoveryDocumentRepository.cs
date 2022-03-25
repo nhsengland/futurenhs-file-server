@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -27,6 +28,12 @@ namespace FutureNHS.WOPIHost
 
             _httpClientFactory = httpClientFactory        ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _wopiConfiguration = wopiConfiguration?.Value ?? throw new ArgumentNullException(nameof(wopiConfiguration));
+
+            var clientDiscoveryDocumentUrl = _wopiConfiguration.ClientDiscoveryDocumentUrl;
+
+            if (clientDiscoveryDocumentUrl is null) throw new ApplicationException($"The {nameof(WopiConfiguration.ClientDiscoveryDocumentUrl)} is null");
+
+            if (!clientDiscoveryDocumentUrl.IsAbsoluteUri) throw new ApplicationException($"The {nameof(WopiConfiguration.ClientDiscoveryDocumentUrl)} is not an absolute URI = {clientDiscoveryDocumentUrl}");
         }
 
         async Task<IWopiDiscoveryDocument> IWopiDiscoveryDocumentRepository.GetAsync(CancellationToken cancellationToken)
@@ -35,42 +42,33 @@ namespace FutureNHS.WOPIHost
 
             var clientDiscoveryDocumentUrl = _wopiConfiguration.ClientDiscoveryDocumentUrl;
 
-            if (string.IsNullOrWhiteSpace(clientDiscoveryDocumentUrl)) return WopiDiscoveryDocument.Empty;
-            if (!Uri.IsWellFormedUriString(clientDiscoveryDocumentUrl, UriKind.Absolute)) return WopiDiscoveryDocument.Empty;
-
-            var discoveryDocumentUrl = new Uri(clientDiscoveryDocumentUrl, UriKind.Absolute);
+            Debug.Assert(clientDiscoveryDocumentUrl is not null);
 
             var httpClient = _httpClientFactory.CreateClient("wopi-discovery-document");
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, discoveryDocumentUrl);
+            using var httpRequestMessage = new HttpRequestMessage(HttpMethod.Get, clientDiscoveryDocumentUrl);
 
             var xmlMediaTypes = new[] { "application/xml", "text/xml" };
 
             var accepts = xmlMediaTypes.Aggregate(string.Empty, (acc, n) => string.Concat(acc, n, ", "))[0..^2];
 
-            request.Headers.Add("Accept", accepts);
+            httpRequestMessage.Headers.Add("Accept", accepts);
 
             try
             {               
-                using var response = await httpClient.SendAsync(request, cancellationToken);
+                using var response = await httpClient.SendAsync(httpRequestMessage, cancellationToken);
 
                 if (!response.IsSuccessStatusCode) return WopiDiscoveryDocument.Empty;
-
-                var contentType = response.Content?.Headers.ContentType?.MediaType?.Trim();
-
-                if (string.IsNullOrWhiteSpace(contentType)) return WopiDiscoveryDocument.Empty;
-
-                if (!accepts.Contains(contentType, StringComparison.OrdinalIgnoreCase)) return WopiDiscoveryDocument.Empty;
 
                 var httpContent = response.Content;
 
                 if (httpContent is null) return WopiDiscoveryDocument.Empty;
 
-                using var strm = await httpContent.ReadAsStreamAsync();
+                using var strm = await httpContent.ReadAsStreamAsync(cancellationToken);
 
                 var xml = await XDocument.LoadAsync(strm, LoadOptions.None, cancellationToken);
 
-                if (WopiDiscoveryDocument.IsXmlDocumentSupported(xml)) return new WopiDiscoveryDocument(discoveryDocumentUrl, xml, _logger);
+                if (WopiDiscoveryDocument.IsXmlDocumentSupported(xml)) return new WopiDiscoveryDocument(clientDiscoveryDocumentUrl, xml, _logger);
             }
             catch (HttpRequestException ex)
             {

@@ -16,7 +16,7 @@ namespace FutureNHS.WOPIHost.Azure
 {
     public interface IAzureSqlClient
     {
-        Task<T> GetRecord<T>(string sqlQuery, object parameters, CancellationToken cancellationToken) where T : class;
+        Task<T?> GetRecord<T>(string sqlQuery, object parameters, CancellationToken cancellationToken) where T : class;
     }
 
     public sealed class AzureSqlClient : IAzureSqlClient
@@ -33,7 +33,7 @@ namespace FutureNHS.WOPIHost.Azure
             _azureSqlDbConnectionFactory = azureSqlDbConnectionFactory ?? throw new ArgumentNullException(nameof(azureSqlDbConnectionFactory));
         }
 
-        async Task<T> IAzureSqlClient.GetRecord<T>(string sqlQuery, object parameters, CancellationToken cancellationToken)
+        async Task<T?> IAzureSqlClient.GetRecord<T>(string sqlQuery, object parameters, CancellationToken cancellationToken)
             where T : class
         {
             if (string.IsNullOrWhiteSpace(sqlQuery)) throw new ArgumentNullException(nameof(sqlQuery));
@@ -50,7 +50,10 @@ namespace FutureNHS.WOPIHost.Azure
 
             var resiliencyPolicy = Policy.WrapAsync(retryPolicy, globalResiliencyPolicy);
 
-            var record = await resiliencyPolicy.ExecuteAsync(ct => sqlConnection.QuerySingleAsync<T>(cmd), cancellationToken);
+            var record = await resiliencyPolicy.ExecuteAsync(ct => sqlConnection.QuerySingleOrDefaultAsync<T>(cmd), cancellationToken);
+
+            // TODO - Possible leaky abstraction if we let things like SqlException escalate?   Extend interface to expose custom exception types for common failures
+            //        such as failing to connect to the remote store?
 
             return record;
         }
@@ -61,7 +64,7 @@ namespace FutureNHS.WOPIHost.Azure
 #else
         private
 #endif
-            static AsyncPolicyWrap GetAsyncGlobalResiliencyPolicyFor(string policyKey)
+            AsyncPolicyWrap GetAsyncGlobalResiliencyPolicyFor(string policyKey)
         {
             if (_globalPolicies.TryGetValue(policyKey, out var cachedPolicy)) return cachedPolicy;
 
@@ -98,7 +101,7 @@ namespace FutureNHS.WOPIHost.Azure
                           sleepDurationProvider: retryNumber => TimeSpan.FromSeconds(Math.Pow(2, retryNumber)) + TimeSpan.FromMilliseconds(jitterer.Next(0, 100)),
                           (ex, sleepingFor, retryNumber, ctxt) =>
                           {
-                              _logger?.LogTrace("Azure SQL Retry handler on iteration {RetryNumber} sleeping {SleepDuration} ms after error '{ErrorMsg}' against context {CorrelationId}", retryNumber, sleepingFor.TotalMilliseconds, ex.Message, ctxt.CorrelationId);
+                              _logger?.LogTrace("Azure SQL Retry handler on iteration {RetryNumber} sleeping {SleepDuration} ms after error '{ErrorMsg}' against context with correlation id = '{CorrelationId}'", retryNumber, sleepingFor.TotalMilliseconds, ex.Message, ctxt.CorrelationId);
                           }
                       );
 
@@ -110,7 +113,16 @@ namespace FutureNHS.WOPIHost.Azure
 #else
         private
 #endif
-        static AsyncPolicy GetAsyncBulkheadPolicy() => Policy.BulkheadAsync(maxParallelization: 3, maxQueuingActions: 25);
+        AsyncPolicy GetAsyncBulkheadPolicy() => Policy.BulkheadAsync(
+            maxParallelization: 3,  // At most 3 concurrent requests to the database at the same time
+            maxQueuingActions: 25,  // If we have more than 3 concurrent requests, queue up to a maximum of 25 other requests before we start to refuse them
+            ctxt =>
+            {
+                _logger?.LogTrace("Azure SQL Bulkhead Policy rejected request with correlation id = '{CorrelationId}'", ctxt.CorrelationId);
+
+                return Task.CompletedTask;
+            }
+            );
 
 
         [SuppressMessage("Usage", "EF1001:Internal EF Core API usage.", Justification = "<Pending>")]

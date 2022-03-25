@@ -1,0 +1,11 @@
+docker login
+
+docker build -t fnhso-dev-wopi-client:1.0.0 .
+
+docker tag fnhso-dev-wopi-client:1.0.0 richardcds/fnhs-wopi-client:fnhso-dev-1.0.0
+docker tag fnhso-dev-wopi-client:1.0.0 richardcds/fnhs-wopi-client:fnhso-dev-latest
+
+docker push -a richardcds/fnhs-wopi-client
+
+:: docker run -t -d -p 0.0.0.0:9980:9980 -e "domain=host\\.docker\\.internal:44355" -e "username=admin" -e "password=S3cRet" --name=fnhso-dev-wopi-client --restart always --cap-add MKNOD fnhso-dev-wopi-client:1.0.0
+

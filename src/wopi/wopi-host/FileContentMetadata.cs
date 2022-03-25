@@ -1,21 +1,22 @@
 ﻿using System;
+using System.Text.Json.Serialization;
 
 namespace FutureNHS.WOPIHost
 {
     public sealed class FileContentMetadata
     {
-        public static FileContentMetadata EMPTY = new FileContentMetadata();
+        public static FileContentMetadata Empty = new FileContentMetadata();
 
         private FileContentMetadata() { }
 
-        public FileContentMetadata(string version, string contentType, byte[] contentHash, ulong contentLength, string? contentEncoding, string? contentLanguage, DateTimeOffset? lastAccessed, DateTimeOffset lastModified, FileMetadata fileMetadata)
+        public FileContentMetadata(string contentVersion, string contentType, byte[] contentHash, ulong contentLength, string? contentEncoding, string? contentLanguage, DateTimeOffset? lastAccessed, DateTimeOffset lastModified, UserFileMetadata fileMetadata)
         {
-            if (string.IsNullOrWhiteSpace(version)) throw new ArgumentNullException(nameof(version));
+            if (string.IsNullOrWhiteSpace(contentVersion)) throw new ArgumentNullException(nameof(contentVersion));
             if (string.IsNullOrWhiteSpace(contentType)) throw new ArgumentNullException(nameof(contentType));
         
             if (0 > contentLength) throw new ArgumentOutOfRangeException(nameof(contentLength), "Must be greater than zero");
 
-            Version = version;
+            ContentVersion = contentVersion;
             ContentLength = contentLength;
             ContentType = contentType;
             ContentEncoding = contentEncoding;
@@ -28,11 +29,12 @@ namespace FutureNHS.WOPIHost
             FileMetadata = fileMetadata ?? throw new ArgumentNullException(nameof(fileMetadata));
         }
 
-        public bool IsEmpty => ReferenceEquals(this, EMPTY);
+        [JsonIgnore]
+        public bool IsEmpty => ReferenceEquals(this, Empty);
 
-        public FileMetadata? FileMetadata { get; }
+        public UserFileMetadata? FileMetadata { get; }
 
-        public string? Version { get; }
+        public string? ContentVersion { get; }
         public string? ContentType { get; }
         public string? ContentHash { get; }
         public ulong? ContentLength { get; }

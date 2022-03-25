@@ -7,7 +7,10 @@ namespace FutureNHS.WOPIHost
     {
         public static string? ToIso8601(this DateTimeOffset? dateTimeOffset) =>
             dateTimeOffset.HasValue 
-            ? dateTimeOffset.Value.ToString("o", CultureInfo.InvariantCulture)
+            ? dateTimeOffset.Value.ToIso8601()
             : default;
+
+        public static string ToIso8601(this DateTimeOffset dateTimeOffset) =>
+            dateTimeOffset.ToString("o", CultureInfo.InvariantCulture);
     }
 }

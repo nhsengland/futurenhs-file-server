@@ -17,20 +17,20 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
     public sealed class CheckFileInfoWopiRequestHandlerTests
     {
         [TestMethod]
-        [DataRow("file-title1", "file-description1", "group1", "version1", "owner1", "Excel-Spreadsheet.xlsx", ".xlsx", ulong.MaxValue, "hash")]
-        [DataRow("file-title2", "file-description2", "group2", "version2", "owner2", "Image-File.jpg", ".jpg", ulong.MaxValue, "hash")]
-        [DataRow("file-title3", "file-description3", "group3", "version3", "owner3", "OpenDocument-Text-File.odt", ".odt", ulong.MaxValue, "hash")]
-        [DataRow("file-title4", "file-description4", "group4", "version4", "owner4", "Portable-Document-Format-File.pdf", ".pdf", ulong.MaxValue, "hash")]
-        [DataRow("file-title5", "file-description5", "group5", "version5", "owner5", "PowerPoint-Presentation.pptx", ".pptx", ulong.MaxValue, "hash")]
-        [DataRow("file-title6", "file-description6", "group6", "version6", "owner6", "Text-File.txt", ".txt", ulong.MaxValue, "hash")]
-        [DataRow("file-title7", "file-description7", "group7", "version7", "owner7", "Word-Document.docx", ".docx", ulong.MaxValue, "hash")]
-        public async Task HandleAsync_FormsWOPICompliantResponseUsingFileMetadataAndUserContextAndFeatures(string title, string description, string groupName, string version, string owner, string fileName, string extension, ulong sizeInBytes, string contentHash)
+        [DataRow("file-title1", "file-description1", "group1", "owner1", "Excel-Spreadsheet.xlsx", ".xlsx", ulong.MaxValue, "hash")]
+        [DataRow("file-title2", "file-description2", "group2", "owner2", "Image-File.jpg", ".jpg", ulong.MaxValue, "hash")]
+        [DataRow("file-title3", "file-description3", "group3", "owner3", "OpenDocument-Text-File.odt", ".odt", ulong.MaxValue, "hash")]
+        [DataRow("file-title4", "file-description4", "group4", "owner4", "Portable-Document-Format-File.pdf", ".pdf", ulong.MaxValue, "hash")]
+        [DataRow("file-title5", "file-description5", "group5", "owner5", "PowerPoint-Presentation.pptx", ".pptx", ulong.MaxValue, "hash")]
+        [DataRow("file-title6", "file-description6", "group6", "owner6", "Text-File.txt", ".txt", ulong.MaxValue, "hash")]
+        [DataRow("file-title7", "file-description7", "group7", "owner7", "Word-Document.docx", ".docx", ulong.MaxValue, "hash")]
+        public async Task HandleAsync_FormsWOPICompliantResponseUsingFileMetadataAndUserContextAndFeatures(string title, string description, string groupName, string owner, string fileName, string extension, ulong sizeInBytes, string contentHash)
         {
             var cancellationToken = new CancellationToken();
 
             var services = new ServiceCollection();
 
-            var fileMetadataRepository = new Moq.Mock<IFileMetadataProvider>();
+            var fileMetadataRepository = new Moq.Mock<IUserFileMetadataProvider>();
 
             var fileRepositoryInvoked = false;
 
@@ -44,33 +44,42 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
 
             httpContext.Response.Body = responseBodyStream;
 
+            var authenticatedUser = new AuthenticatedUser(Guid.NewGuid(), default);
+
+            var fileId = Guid.NewGuid();
             var fileVersion = Guid.NewGuid().ToString();
 
-            var fileMetadata = new FileMetadata(
-                title: title, 
-                description: description,
-                groupName: groupName,
-                version: version, 
-                owner: owner, 
-                name: fileName, 
-                extension: extension,
-                blobName: fileName,
-                sizeInBytes: sizeInBytes,
-                lastWriteTime: DateTimeOffset.UtcNow, 
-                contentHash: contentHash, 
-                fileStatus: FileStatus.Verified
-                );
+            var file = FutureNHS.WOPIHost.File.With(fileName, fileVersion);
+
+            var fileMetadata = new UserFileMetadata() {
+                FileId = fileId,
+                Title = title,
+                Description = description,
+                GroupName = groupName,
+                FileVersion = fileVersion,
+                OwnerUserName = owner,
+                Name = fileName,
+                Extension = extension,
+                BlobName = fileId.ToString() + extension,
+                SizeInBytes = sizeInBytes,
+                LastWriteTimeUtc = DateTimeOffset.UtcNow,
+                ContentHash = Convert.FromBase64String("aGFzaA == "),
+                UserHasViewPermission = true,
+                UserHasEditPermission = false
+                };
 
             fileMetadataRepository.
-                Setup(x => x.GetForFileAsync(Moq.It.IsAny<FutureNHS.WOPIHost.File>(), Moq.It.IsAny<CancellationToken>())).
-                Callback((FutureNHS.WOPIHost.File givenFile, CancellationToken givenCancellationToken) => {
+                Setup(x => x.GetForFileAsync(Moq.It.IsAny<FutureNHS.WOPIHost.File>(), Moq.It.IsAny<AuthenticatedUser>(), Moq.It.IsAny<CancellationToken>())).
+                Callback((FutureNHS.WOPIHost.File givenFile, AuthenticatedUser givenAuthenticatedUser, CancellationToken givenCancellationToken) => {
 
                     Assert.IsFalse(givenFile.IsEmpty);
 
                     Assert.IsFalse(givenCancellationToken.IsCancellationRequested, "Expected the cancellation token to not be cancelled");
 
-                    Assert.AreSame(fileName, givenFile.Name, "Expected the SUT to request the file from the repository whose name it was provided with");
-                    Assert.AreSame(fileVersion, givenFile.Version, "Expected the SUT to request the file version from the repository that it was provided with");
+                    Assert.AreEqual(file.Id, givenFile.Id, "Expected the SUT to request the file from the repository whose id it was provided with");
+                    Assert.AreEqual(fileName, givenFile.Name, "Expected the SUT to request the file from the repository whose name it was provided with");
+                    Assert.AreEqual(fileVersion, givenFile.Version, "Expected the SUT to request the file version from the repository that it was provided with");
+                    Assert.AreEqual(authenticatedUser, givenAuthenticatedUser, "Expected the SUT to pass to the repository the authenticated user that it was provided with");
                     Assert.AreEqual(cancellationToken, givenCancellationToken, "Expected the same cancellation token to propagate between service interfaces");
 
                     fileRepositoryInvoked = true;
@@ -79,11 +88,8 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
 
             var features = new Features();
 
-            var accessToken = Guid.NewGuid().ToString();
 
-            var file = FutureNHS.WOPIHost.File.With(fileName, fileVersion);
-
-            var checkFileInfoWopiRequestHandler = CheckFileInfoWopiRequestHandler.With(file, accessToken, features);
+            var checkFileInfoWopiRequestHandler = CheckFileInfoWopiRequestHandler.With(authenticatedUser, file, features);
 
             await checkFileInfoWopiRequestHandler.HandleAsync(httpContext, cancellationToken);
 
@@ -100,11 +106,11 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
             Assert.IsNotNull(responseBody);
 
             Assert.AreEqual(fileMetadata.Title, ((JsonElement)(responseBody.BaseFileName)).GetString());
-            Assert.AreEqual(fileMetadata.Version, ((JsonElement)(responseBody.Version)).GetString());
-            Assert.AreEqual(fileMetadata.Owner, ((JsonElement)(responseBody.OwnerId)).GetString());
+            Assert.AreEqual(fileMetadata.FileVersion, ((JsonElement)(responseBody.Version)).GetString());
+            Assert.AreEqual(fileMetadata.OwnerUserName, ((JsonElement)(responseBody.OwnerId)).GetString());
             Assert.AreEqual(fileMetadata.Extension, ((JsonElement)(responseBody.FileExtension)).GetString());
             Assert.AreEqual(fileMetadata.SizeInBytes, ((JsonElement)(responseBody.Size)).GetUInt64());
-            Assert.AreEqual(fileMetadata.LastWriteTime.ToIso8601(), ((JsonElement)(responseBody.LastModifiedTime)).GetString());
+            Assert.AreEqual(fileMetadata.LastWriteTimeUtc.ToIso8601(), ((JsonElement)(responseBody.LastModifiedTime)).GetString());
 
             Assert.AreEqual(FutureNHS.WOPIHost.File.FILENAME_MAXIMUM_LENGTH, ((JsonElement)(responseBody.FileNameMaxLength)).GetInt32());
         }

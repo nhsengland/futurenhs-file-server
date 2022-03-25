@@ -1,4 +1,5 @@
 ﻿using FutureNHS.WOPIHost;
+using FutureNHS.WOPIHost.Azure;
 using FutureNHS.WOPIHost.Configuration;
 using FutureNHS.WOPIHost.WOPIRequests;
 using Microsoft.AspNetCore.Http;
@@ -8,6 +9,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Dynamic;
 using System.IO;
+using System.Net;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,36 +48,48 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
 
             wopiDiscoveryDocumentFactory.Setup(o => o.CreateDocumentAsync(cancellationToken)).Returns(Task.FromResult(wopiDiscoveryDocument.Object));
 
-            var fileMetadata = new FileMetadata(
-                title: title,
-                description: description,
-                groupName: groupName,
-                version: version,
-                owner: owner,
-                name: fileName,
-                extension: extension,
-                blobName: fileName,
-                sizeInBytes: sizeInBytes,
-                lastWriteTime: DateTimeOffset.UtcNow,
-                contentHash: contentHash,
-                fileStatus: FileStatus.Verified
-                );
+            var fileId = Guid.NewGuid();
 
-            var fileMetadataProvider = new Moq.Mock<IFileMetadataProvider>();
+            var fileMetadata = new UserFileMetadata() { 
+                FileId = fileId,
+                Title = title,
+                Description = description,
+                GroupName = groupName,
+                FileVersion = version,
+                OwnerUserName = owner,
+                Name = fileName,
+                Extension = extension,
+                BlobName = fileName,
+                SizeInBytes = sizeInBytes,
+                LastWriteTimeUtc = DateTimeOffset.UtcNow,
+                ContentHash = Convert.FromBase64String("aGFzaA == "),
+                UserHasViewPermission = true,
+                UserHasEditPermission = false
+                };
 
-            fileMetadataProvider.Setup(o => o.GetForFileAsync(file, cancellationToken)).Returns(Task.FromResult(fileMetadata));
+            var authenticatedUser = new AuthenticatedUser(Guid.NewGuid(), default) { FileMetadata = fileMetadata };
 
             var wopiConfiguration = new WopiConfiguration {
-                HostFilesUrl = "https://hostfiles.net/path"
+                HostFilesUrl = new Uri("https://hostfiles.net/path", UriKind.Absolute)
             };
 
             var wopiConfigurationSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
             wopiConfigurationSnapshot.Setup(o => o.Value).Returns(wopiConfiguration);
 
+            var userAuthenticationService = new Moq.Mock<IUserAuthenticationService>();
+
+            var permission = FileAccessPermission.View;
+
+            var userFileAccessToken = new UserFileAccessToken(Guid.NewGuid(), authenticatedUser, permission, DateTimeOffset.UtcNow.AddDays(1));
+
+            userAuthenticationService.Setup(x => x.GenerateAccessToken(authenticatedUser, file, permission, cancellationToken)).Returns(Task.FromResult(userFileAccessToken));
+
             services.AddScoped(sp => wopiDiscoveryDocumentFactory.Object);
-            services.AddScoped(sp => fileMetadataProvider.Object);
             services.AddScoped(sp => wopiConfigurationSnapshot.Object);
+            services.AddScoped(sp => new Moq.Mock<IAzureTableStoreClient>().Object);
+            services.AddScoped(sp => userAuthenticationService.Object);
+            services.AddScoped(sp => new Moq.Mock<IUserFileAccessTokenRepository>().Object);
 
             var httpContext = new DefaultHttpContext
             {
@@ -86,15 +100,13 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
 
             httpContext.Response.Body = responseBodyStream;
 
-            var userAuthToken = Guid.NewGuid().ToString();
-
-            var permission = PostAuthoriseUserRequestHandler.FileAccessPermissions.View;
-
-            var postAuthoriseUserRequestHandler = PostAuthoriseUserRequestHandler.With(userAuthToken, permission, file);
+            var postAuthoriseUserRequestHandler = AuthoriseUserRequestHandler.With(authenticatedUser, permission, file);
 
 
 
             await postAuthoriseUserRequestHandler.HandleAsync(httpContext, cancellationToken);
+
+            Assert.AreEqual((int)HttpStatusCode.OK, httpContext.Response.StatusCode);
 
             Assert.AreEqual("application/json; charset=utf-8", httpContext.Response.ContentType);
 

@@ -19,7 +19,7 @@ namespace FutureNHS.WOPIHost
         /// <param name="streamToWriteTo">The stream to which the content of the file will be written in the success case/></param>
         /// <param name="cancellationToken"></param>
         /// <returns>Information on the content written to the stream</returns>
-        Task<FileContentMetadata> GetDetailsAndPutContentIntoStreamAsync(FileMetadata fileMetadata, Stream streamToWriteTo, CancellationToken cancellationToken);
+        Task<FileContentMetadata> GetDetailsAndPutContentIntoStreamAsync(UserFileMetadata fileMetadata, Stream streamToWriteTo, CancellationToken cancellationToken);
     }
 
     public sealed class FileContentMetadataRepository : IFileContentMetadataRepository
@@ -44,23 +44,23 @@ namespace FutureNHS.WOPIHost
             _blobContainerName = blobContainerName;
         }
 
-        async Task<FileContentMetadata> IFileContentMetadataRepository.GetDetailsAndPutContentIntoStreamAsync(FileMetadata fileMetadata, Stream streamToWriteTo, CancellationToken cancellationToken)
+        async Task<FileContentMetadata> IFileContentMetadataRepository.GetDetailsAndPutContentIntoStreamAsync(UserFileMetadata fileMetadata, Stream streamToWriteTo, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (fileMetadata is null || fileMetadata.IsEmpty) throw new ArgumentNullException(nameof(fileMetadata));
+            if (fileMetadata is null) throw new ArgumentNullException(nameof(fileMetadata));
 
             Debug.Assert(!string.IsNullOrWhiteSpace(fileMetadata.BlobName));
-            Debug.Assert(!string.IsNullOrWhiteSpace(fileMetadata.ContentHash));
+            Debug.Assert(fileMetadata.ContentHash is not null);
 
             if (streamToWriteTo is null) throw new ArgumentNullException(nameof(streamToWriteTo));
 
             Debug.Assert(streamToWriteTo.CanWrite);
 
-            var downloadDetails = await _azureBlobStoreClient.FetchBlobAndWriteToStream(_blobContainerName, fileMetadata.BlobName, fileMetadata.Version, fileMetadata.ContentHash, streamToWriteTo, cancellationToken);
+            var downloadDetails = await _azureBlobStoreClient.FetchBlobAndWriteToStream(_blobContainerName, fileMetadata.BlobName, fileMetadata.FileVersion, fileMetadata.ContentHash, streamToWriteTo, cancellationToken);
 
             return new FileContentMetadata(
-                version: downloadDetails.VersionId,
+                contentVersion: downloadDetails.VersionId,
                 contentHash: downloadDetails.ContentHash,               
                 contentEncoding: downloadDetails.ContentEncoding,
                 contentLanguage: downloadDetails.ContentLanguage,

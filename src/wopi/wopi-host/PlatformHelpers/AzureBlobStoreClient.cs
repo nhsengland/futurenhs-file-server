@@ -6,7 +6,6 @@ using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
 using FutureNHS.WOPIHost.Exceptions;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Globalization;
@@ -14,12 +13,15 @@ using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authentication;
+using FutureNHS.WOPIHost.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace FutureNHS.WOPIHost.Azure
 {  
     public interface IAzureBlobStoreClient
     {
-        Task<BlobDownloadDetails> FetchBlobAndWriteToStream(string containerName, string blobName, string? blobVersion, string contentHash, Stream streamToWriteTo, CancellationToken cancellationToken);
+        Task<BlobDownloadDetails> FetchBlobAndWriteToStream(string containerName, string blobName, string? blobVersion, byte[] contentHash, Stream streamToWriteTo, CancellationToken cancellationToken);
 
         Task<Uri> GenerateEphemeralDownloadLink(string containerName, string blobName, string blobVersion, string publicFacingBlobName, CancellationToken cancellationToken);
     }
@@ -45,20 +47,28 @@ namespace FutureNHS.WOPIHost.Azure
         const int TOKEN_SAS_TIMEOUT_IN_MINUTES = 40;                 // Aligns with authentication cookie timeout policy for which we have an NFR
 
         private readonly IMemoryCache _memoryCache;
-        private readonly ISystemClock _clock;
+        private readonly ISystemClock _systemClock;
         private readonly ILogger<AzureBlobStoreClient>? _logger;
 
         private readonly Uri _primaryServiceUrl;
         private readonly Uri _geoRedundantServiceUrl;
 
-        public AzureBlobStoreClient(Uri primaryServiceUrl, Uri geoRedundantServiceUrl, IMemoryCache memoryCache, ISystemClock clock, ILogger<AzureBlobStoreClient>? logger)
+        public AzureBlobStoreClient(IOptionsSnapshot<AzurePlatformConfiguration> configuration, IMemoryCache memoryCache, ISystemClock systemClock, ILogger<AzureBlobStoreClient>? logger)
         {
-            _primaryServiceUrl = primaryServiceUrl             ?? throw new ArgumentNullException(nameof(primaryServiceUrl));
-            _geoRedundantServiceUrl = geoRedundantServiceUrl   ?? throw new ArgumentNullException(nameof(geoRedundantServiceUrl));
             _memoryCache = memoryCache                         ?? throw new ArgumentNullException(nameof(memoryCache));
-            _clock = clock                                     ?? throw new ArgumentNullException(nameof(clock));
+            _systemClock = systemClock                         ?? throw new ArgumentNullException(nameof(systemClock));
 
             _logger = logger;
+
+            if (configuration?.Value?.AzureBlobStorage is null) throw new ArgumentNullException(nameof(configuration));
+
+            var blobStorageConfiguration = configuration.Value.AzureBlobStorage;
+
+            var primaryServiceUrl = blobStorageConfiguration.PrimaryServiceUrl;
+            var geoRedundantServiceUrl = blobStorageConfiguration.GeoRedundantServiceUrl;
+
+            _primaryServiceUrl = primaryServiceUrl             ?? throw new ArgumentNullException(nameof(configuration));
+            _geoRedundantServiceUrl = geoRedundantServiceUrl   ?? throw new ArgumentNullException(nameof(configuration));
         }
 
         private static bool IsSuccessStatusCode(int statusCode) => statusCode >= 200 && statusCode <= 299;
@@ -73,7 +83,7 @@ namespace FutureNHS.WOPIHost.Azure
             blobClientOptions.Retry.MaxDelay = TimeSpan.FromMinutes(1);
             blobClientOptions.Retry.MaxRetries = 5;
             blobClientOptions.Retry.Mode = Core.RetryMode.Exponential;
-            blobClientOptions.Retry.NetworkTimeout = TimeSpan.FromSeconds(100);
+            blobClientOptions.Retry.NetworkTimeout = TimeSpan.FromSeconds(30);
 
             blobClientOptions.Diagnostics.IsDistributedTracingEnabled = true;
             blobClientOptions.Diagnostics.IsLoggingContentEnabled = false;
@@ -83,14 +93,14 @@ namespace FutureNHS.WOPIHost.Azure
             return blobClientOptions;
         }
 
-        async Task<BlobDownloadDetails> IAzureBlobStoreClient.FetchBlobAndWriteToStream(string containerName, string blobName, string? blobVersion, string contentHash, Stream streamToWriteTo, CancellationToken cancellationToken)
+        async Task<BlobDownloadDetails> IAzureBlobStoreClient.FetchBlobAndWriteToStream(string containerName, string blobName, string? blobVersion, byte[] contentHash, Stream streamToWriteTo, CancellationToken cancellationToken)
         {
             // https://docs.microsoft.com/en-us/azure/storage/common/storage-auth-aad-msi
             // https://docs.microsoft.com/en-gb/dotnet/api/overview/azure/identity-readme
 
             if (string.IsNullOrWhiteSpace(containerName)) throw new ArgumentNullException(nameof(containerName));
             if (string.IsNullOrWhiteSpace(blobName)) throw new ArgumentNullException(nameof(blobName));
-            if (string.IsNullOrWhiteSpace(contentHash)) throw new ArgumentNullException(nameof(contentHash));
+            if (contentHash is null) throw new ArgumentNullException(nameof(contentHash));
 
             if (streamToWriteTo is null) throw new ArgumentNullException(nameof(streamToWriteTo));
 
@@ -134,9 +144,10 @@ namespace FutureNHS.WOPIHost.Azure
                 //        used to verify it has stored the file correctly) so I need to revisit this fully when time allows.   For now, we 
                 //        cannot check the hashes
 
-                //var blobContentHash = Convert.ToBase64String(details.BlobContentHash ?? details.ContentHash);
+                var blobContentHash = Convert.ToBase64String(details.BlobContentHash ?? details.ContentHash);
+                var encodedHash = Convert.ToBase64String(contentHash);
 
-                //if (0 != string.CompareOrdinal(blobContentHash, contentHash)) throw new IrretrievableFileException($"{response.ClientRequestId}: Unable to share the file with the user as the content hash stored during upload does not match that of the downloaded file - '{blobName}' + '{blobVersion}'");
+                if (0 != string.CompareOrdinal(blobContentHash, encodedHash)) throw new IrretrievableFileException($"{response.ClientRequestId}: Unable to share the file with the user as the content hash stored during upload does not match that of the downloaded file - '{blobName}' + '{blobVersion}'");
 
                 await result.Value.Content.CopyToAsync(streamToWriteTo, cancellationToken);
 
@@ -182,7 +193,7 @@ namespace FutureNHS.WOPIHost.Azure
 
             var blobClient = blobContainerClient.GetBlobClient(blobName).WithVersion(blobVersion);
 
-            var tokenStartsOn = _clock.UtcNow;
+            var tokenStartsOn = _systemClock.UtcNow;
 
             var tokenExpiresOn = tokenStartsOn.AddMinutes(TOKEN_SAS_TIMEOUT_IN_MINUTES);
 

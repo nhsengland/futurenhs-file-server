@@ -59,7 +59,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
         {
             var httpClientFactory = new Moq.Mock<IHttpClientFactory>().Object;
 
-            var wopiConfiguration = new WopiConfiguration();
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = new Uri("https://absolute.uri") };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -77,7 +77,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
         {
             var logger = new Moq.Mock<ILogger<WopiDiscoveryDocumentRepository>>().Object;
 
-            var wopiConfiguration = new WopiConfiguration();
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = new Uri("https://absolute.uri") };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -103,7 +103,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + "client/hosting/discovery", UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -145,40 +145,6 @@ namespace FutureNHS_WOPI_Host_UnitTests
         }
 
         [TestMethod]
-        public async Task GetAsync_ReturnsEmptyDocumentWhenAbsoluteSourceEndpointIsNotKnown()
-        {
-            var cancellationToken = new CancellationToken();
-
-            var logger = new Moq.Mock<ILogger<WopiDiscoveryDocumentRepository>>().Object;
-
-            var sourceEndpoint = default(Uri);
-
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint?.AbsoluteUri };
-
-            var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
-
-            wopiConfigurationOptionsSnapshot.SetupGet(x => x.Value).Returns(wopiConfiguration);
-
-            var httpClientFactory = new Moq.Mock<IHttpClientFactory>();
-
-            var httpClient = new Moq.Mock<HttpClient>().Object;
-
-            httpClientFactory.Setup(x => x.CreateClient("wopi-discovery-document")).Returns(httpClient);
-
-            IWopiDiscoveryDocumentRepository wopiDiscoveryDocumentRepository = new WopiDiscoveryDocumentRepository(httpClientFactory.Object, wopiConfigurationOptionsSnapshot.Object, logger);
-
-            var wopiDiscoveryDocument = await wopiDiscoveryDocumentRepository.GetAsync(cancellationToken);
-
-            Assert.AreSame(WopiDiscoveryDocument.Empty, wopiDiscoveryDocument, "Discovery document should be empty when the endpoint URL is not known");
-
-            sourceEndpoint = new Uri("/relative/path", UriKind.Relative);
-
-            wopiDiscoveryDocument = await wopiDiscoveryDocumentRepository.GetAsync(cancellationToken);
-
-            Assert.AreSame(WopiDiscoveryDocument.Empty, wopiDiscoveryDocument, "Discovery document should be empty when the endpoint URL is not an absolute uri");
-        }
-
-        [TestMethod]
         public async Task GetAsync_ReturnsEmptyDocumentIfFailureStatusCodeReturnedFromWopiClient()
         {
             var cancellationToken = new CancellationToken();
@@ -187,7 +153,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + "client/hosting/discovery", UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -219,7 +185,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + "client/hosting/discovery", UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -254,7 +220,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + "client/hosting/discovery", UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -291,7 +257,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + "client/hosting/discovery", UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -326,7 +292,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + "client/hosting/discovery", UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 
@@ -356,7 +322,7 @@ namespace FutureNHS_WOPI_Host_UnitTests
 
             var sourceEndpoint = new Uri(WopiDiscoveryDocumentTests.WOPI_ROOT + WopiDiscoveryDocumentTests.WOPI_DISCOVERY_DOCUMENT_URL, UriKind.Absolute);
 
-            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint.AbsoluteUri };
+            var wopiConfiguration = new WopiConfiguration() { ClientDiscoveryDocumentUrl = sourceEndpoint };
 
             var wopiConfigurationOptionsSnapshot = new Moq.Mock<IOptionsSnapshot<WopiConfiguration>>();
 

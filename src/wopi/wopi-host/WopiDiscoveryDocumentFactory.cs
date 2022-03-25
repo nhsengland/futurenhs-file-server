@@ -48,7 +48,7 @@ namespace FutureNHS.WOPIHost
 
                 wopiDiscoveryDocument = await _wopiDiscoveryDocumentRepository.GetAsync(cancellationToken);
 
-                _logger?.LogTrace("WOPI discovery document " + (wopiDiscoveryDocument.IsEmpty ? "is empty" : "successfully downloaded"));
+                _logger?.LogTrace("WOPI discovery document {RESULT}", (wopiDiscoveryDocument.IsEmpty ? "is empty" : "successfully downloaded"));
 
                 cancellationToken.ThrowIfCancellationRequested();
 

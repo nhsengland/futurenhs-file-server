@@ -17,48 +17,21 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
     {
         [TestMethod]
         [ExpectedException(typeof(ArgumentNullException))]
+        public void With_ThrowsIfAuthenticatedUserIsNull()
+        {
+            var file = File.FromId(Guid.NewGuid().ToString());
+
+            GetFileWopiRequestHandler.With(default, file);
+        }
+        
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentNullException))]
         public void With_ThrowsIfFileIsEmpty()
         {
-            GetFileWopiRequestHandler.With(File.EMPTY, accessToken: "access-token");
+            var authenticatedUser = new AuthenticatedUser(Guid.NewGuid(), default);
+
+            GetFileWopiRequestHandler.With(authenticatedUser, File.Empty);
         }
-
-        [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void With_ThrowsIfAccessTokenIsNull()
-        {
-            var file = File.With("file-name", "file-version");
-
-            GetFileWopiRequestHandler.With(file, accessToken: default);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void With_ThrowsIfAccessTokenIsEmpty()
-        {
-            var file = File.With("file-name", "file-version");
-
-            GetFileWopiRequestHandler.With(file, accessToken: string.Empty);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void With_ThrowsIfAccessTokenIsWhitespace()
-        {
-            var file = File.With("file-name", "file-version");
-
-            GetFileWopiRequestHandler.With(file, accessToken: " ");
-        }
-
-        [TestMethod]
-        public void With_DoesNotThrowIfAccessTokenIsNeitherNullNorWhitespace()
-        {
-            var file = File.With("file-name", "file-version");
-
-            GetFileWopiRequestHandler.With(file, accessToken: "access-token");
-        }
-
-
-
         [TestMethod]
         [DataRow("Excel-Spreadsheet.xlsx")]
         [DataRow("Image-File.jpg")]
@@ -101,22 +74,40 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
 
             var contentHash = algo.ComputeHash(fileBuffer);
 
-            var fileMetadata = new FileMetadata("title", "description", "group-name", fileVersion, "owner", fileName, fileInfo.Extension, (ulong)fileInfo.Length, "blobName", DateTimeOffset.UtcNow, Convert.ToBase64String(contentHash), FileStatus.Verified);
+            var fileId = Guid.NewGuid();
+
+            var fileMetadata = new UserFileMetadata() {
+                FileId = fileId,
+                FileVersion = fileVersion,
+                Title = "title",
+                Description = "description",
+                Name = fileName,
+                SizeInBytes = (ulong)fileInfo.Length,
+                Extension = fileInfo.Extension,
+                ContentHash = Convert.FromBase64String("aGFzaA == "),
+                GroupName = "groupName",
+                OwnerUserName = "owner",
+                BlobName = "blobName",
+                LastWriteTimeUtc = DateTimeOffset.UtcNow,
+                UserHasViewPermission = true,
+                UserHasEditPermission = false
+                };
 
             var fileWriteDetails = new FileContentMetadata(fileVersion, "content-type", contentHash, (ulong)fileBuffer.Length, "content-encoding", "content-language", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, fileMetadata);
 
             fileContentMetadataRepository.
-                Setup(x => x.GetDetailsAndPutContentIntoStreamAsync(Moq.It.IsAny<FileMetadata>(), Moq.It.IsAny<Stream>(), Moq.It.IsAny<CancellationToken>())).
-                Callback(async (FileMetadata givenFileMetadata, Stream givenStream, CancellationToken givenCancellationToken) => {
+                Setup(x => x.GetDetailsAndPutContentIntoStreamAsync(Moq.It.IsAny<UserFileMetadata>(), Moq.It.IsAny<Stream>(), Moq.It.IsAny<CancellationToken>())).
+                Callback(async (UserFileMetadata givenFileMetadata, Stream givenStream, CancellationToken givenCancellationToken) => {
 
-                    Assert.IsFalse(givenFileMetadata.IsEmpty);
+                    Assert.IsNotNull(givenFileMetadata);
                     Assert.IsNotNull(givenStream);
 
                     Assert.IsFalse(givenCancellationToken.IsCancellationRequested, "Expected the cancellation token to not be cancelled");
 
-                    Assert.AreSame(responseBodyStream, givenStream, "Expected the SUT to as the repository to write the file to the stream it was asked to");
-                    Assert.AreSame(fileName, givenFileMetadata.Name, "Expected the SUT to request the file from the repository whose name it was provided with");
-                    Assert.AreSame(fileVersion, givenFileMetadata.Version, "Expected the SUT to request the file version from the repository that it was provided with");
+                    Assert.AreEqual(responseBodyStream, givenStream, "Expected the SUT to as the repository to write the file to the stream it was asked to");
+                    Assert.AreEqual(fileId, givenFileMetadata.FileId, "Expected the SUT to request the file from the repository whose id it was provided with");
+                    Assert.AreEqual(fileName, givenFileMetadata.Name, "Expected the SUT to request the file from the repository whose name it was provided with");
+                    Assert.AreEqual(fileVersion, givenFileMetadata.FileVersion, "Expected the SUT to request the file version from the repository that it was provided with");
                     Assert.AreEqual(cancellationToken, givenCancellationToken, "Expected the same cancellation token to propagate between service interfaces");
 
                     await givenStream.WriteAsync(fileBuffer, cancellationToken);
@@ -126,17 +117,17 @@ namespace FutureNHS_WOPI_Host_UnitTests.WOPIRequests
                 }).
                 Returns(Task.FromResult(fileWriteDetails));
 
-            var fileMetadataProvider = new Moq.Mock<IFileMetadataProvider>();
+            var fileMetadataProvider = new Moq.Mock<IUserFileMetadataProvider>();
 
-            fileMetadataProvider.Setup(x => x.GetForFileAsync(Moq.It.IsAny<File>(), Moq.It.IsAny<CancellationToken>())).Returns(Task.FromResult(fileMetadata));
+            fileMetadataProvider.Setup(x => x.GetForFileAsync(Moq.It.IsAny<File>(), Moq.It.IsAny<AuthenticatedUser>(), Moq.It.IsAny<CancellationToken>())).Returns(Task.FromResult(fileMetadata));
 
             services.AddScoped(sp => fileMetadataProvider.Object);
 
-            var accessToken = Guid.NewGuid().ToString();
-
             var file = File.With(fileName, fileVersion);
 
-            var getFileWopiRequest = GetFileWopiRequestHandler.With(file, accessToken);
+            var authenticatedUser = new AuthenticatedUser(Guid.NewGuid(), default);
+
+            var getFileWopiRequest = GetFileWopiRequestHandler.With(authenticatedUser, file);
 
             httpContext.RequestServices = services.BuildServiceProvider();
 

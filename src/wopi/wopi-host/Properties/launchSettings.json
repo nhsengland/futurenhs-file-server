@@ -15,7 +15,7 @@
     "IIS Express": {
       "commandName": "IISExpress",
       "launchBrowser": true,
-      "launchUrl": "wopi/collabora?file_id=Excel-Spreadsheet.xlsx",
+      "launchUrl": "wopi/collabora",
       "environmentVariables": {
         "USE_AZURE_APP_CONFIGURATION": "true",
         "ASPNETCORE_ENVIRONMENT": "Development"

@@ -2,6 +2,7 @@ using FutureNHS.WOPIHost.Azure;
 using FutureNHS.WOPIHost.Configuration;
 using FutureNHS.WOPIHost.WOPIRequests;
 using Microsoft.ApplicationInsights.DependencyCollector;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -9,7 +10,6 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.FeatureManagement;
@@ -17,7 +17,6 @@ using Microsoft.FeatureManagement.FeatureFilters;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Dynamic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -37,6 +36,7 @@ namespace FutureNHS.WOPIHost
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddHttpClient("wopi-discovery-document").AddCoreResiliencyPolicies();
+            services.AddHttpClient("mvcforum-userinfo").AddCoreResiliencyPolicies();
 
             services.AddMemoryCache(); //options => { });
 
@@ -63,25 +63,29 @@ namespace FutureNHS.WOPIHost
             services.Configure<Features>(_configuration.GetSection("FeatureManagement"), binderOptions => binderOptions.BindNonPublicProperties = true);
             services.Configure<WopiConfiguration>(_configuration.GetSection("Wopi"));
             services.Configure<AzurePlatformConfiguration>(_configuration.GetSection("AzurePlatform"));
+            services.Configure<AppConfiguration>(_configuration.GetSection("App"));
 
             services.AddSingleton<ISystemClock>(new SystemClock());
 
             services.AddScoped<CoreResilientRetryHandler>();
 
-            services.AddScoped<IAzureBlobStoreClient>(
-                sp => {
-                    var config = sp.GetRequiredService<IOptionsSnapshot<AzurePlatformConfiguration>>().Value.AzureBlobStorage;
+            services.AddScoped<IAzureBlobStoreClient, AzureBlobStoreClient>();
+            services.AddScoped<IAzureTableStoreClient, AzureTableStoreClient>();
 
-                    if (config is null) throw new ApplicationException("Unable to load the azure blob storage configuration");
-                    if (config.PrimaryServiceUrl is null) throw new ApplicationException("The azure blob storage primary service url is null in the files configuration section");
-                    if (config.GeoRedundantServiceUrl is null) throw new ApplicationException("The azure blob storage geo-redundant service url is null in the files configuration section");
+            //services.AddScoped<IAzureBlobStoreClient>(
+            //    sp => {
+            //        var config = sp.GetRequiredService<IOptionsSnapshot<AzurePlatformConfiguration>>().Value.AzureBlobStorage;
 
-                    var memoryCache = sp.GetRequiredService<IMemoryCache>();
-                    var clock = sp.GetRequiredService<ISystemClock>();
-                    var logger = sp.GetRequiredService<ILogger<AzureBlobStoreClient>>();
+            //        if (config is null) throw new ApplicationException("Unable to load the azure blob storage configuration");
+            //        if (config.PrimaryServiceUrl is null) throw new ApplicationException("The azure blob storage primary service url is null in the files configuration section");
+            //        if (config.GeoRedundantServiceUrl is null) throw new ApplicationException("The azure blob storage geo-redundant service url is null in the files configuration section");
 
-                    return new AzureBlobStoreClient(config.PrimaryServiceUrl, config.GeoRedundantServiceUrl, memoryCache, clock, logger);
-                });
+            //        var memoryCache = sp.GetRequiredService<IMemoryCache>();
+            //        var clock = sp.GetRequiredService<ISystemClock>();
+            //        var logger = sp.GetRequiredService<ILogger<AzureBlobStoreClient>>();
+
+            //        return new AzureBlobStoreClient(config.PrimaryServiceUrl, config.GeoRedundantServiceUrl, memoryCache, clock, logger);
+            //    });
 
             services.AddScoped<IAzureSqlDbConnectionFactory>(
                 sp => {
@@ -99,28 +103,16 @@ namespace FutureNHS.WOPIHost
             services.AddScoped<IAzureSqlClient, AzureSqlClient>();
 
             services.AddScoped<IFileContentMetadataRepository, FileContentMetadataRepository>();
-            services.AddScoped<IFileContentService, FileContentService>();
+            
+            services.AddScoped<IUserFileMetadataProvider, UserFileMetadataProvider>();
+            services.AddScoped<IUserFileAccessTokenRepository, UserFileAccessTokenRepository>();
 
-            services.AddScoped<IFileMetadataProvider, FileMetadataProvider>();
-            services.AddScoped<IFileMetadataProvider, FileMetadataProvider>();
+            services.AddScoped<IUserAuthenticationService, UserAuthenticationService>();
 
-            //services.AddScoped<AzureSqlClient>();
-            //services.AddScoped<IAzureSqlClient>(sp => sp.GetRequiredService<AzureSqlClient>());
-
-            //services.AddScoped<FileMetadataRepository>();
-            //services.AddScoped<IFileMetadataRepository>(sp => sp.GetRequiredService<FileMetadataRepository>());
-
-            services.AddScoped<WopiDiscoveryDocumentFactory>();
-            services.AddScoped<IWopiDiscoveryDocumentFactory>(sp => sp.GetRequiredService<WopiDiscoveryDocumentFactory>());
-
-            services.AddScoped<WopiDiscoveryDocumentRepository>();
-            services.AddScoped<IWopiDiscoveryDocumentRepository>(sp => sp.GetRequiredService<WopiDiscoveryDocumentRepository>());
-
-            services.AddScoped<WopiRequestHandlerFactory>();
-            services.AddScoped<IWopiRequestHandlerFactory>(sp => sp.GetRequiredService<WopiRequestHandlerFactory>());
-
-            services.AddScoped<WopiCryptoProofChecker>();
-            services.AddScoped<IWopiCryptoProofChecker>(sp => sp.GetRequiredService<WopiCryptoProofChecker>());
+            services.AddScoped<IWopiDiscoveryDocumentFactory, WopiDiscoveryDocumentFactory>();
+            services.AddScoped<IWopiDiscoveryDocumentRepository, WopiDiscoveryDocumentRepository>();
+            services.AddScoped<IWopiRequestHandlerFactory, WopiRequestHandlerFactory>();
+            services.AddScoped<IWopiCryptoProofChecker, WopiCryptoProofChecker>();
 
             services.AddFeatureManagement().
                      AddFeatureFilter<TimeWindowFilter>().      // enable a feature between a start and end date ....... https://docs.microsoft.com/dotnet/api/microsoft.featuremanagement.featurefilters.timewindowfilter?view=azure-dotnet-preview
@@ -162,80 +154,19 @@ namespace FutureNHS.WOPIHost
 
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapGet("/error", GetProductionErrorPageAsync);
                 endpoints.MapGet("/wopi/health-check", GetHealthCheckPageAsync);
                 endpoints.MapGet("/wopi/collabora",  GetCollaboraHostPageAsync);
            });
         }
 
-        private static async Task GetProductionErrorPageAsync(HttpContext httpContext)
-        {
-            httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-
-            var sb = new StringBuilder();
-
-            sb.AppendLine($"<!doctype html>");
-            sb.AppendLine($"<html>");
-            sb.AppendLine($"  <body>");
-            sb.AppendLine($"    <p>");
-            sb.AppendLine($"      ==============================</br>");
-            sb.AppendLine($"      Oooops - Internal server error</br>");
-            sb.AppendLine($"      ==============================</br>");
-            sb.AppendLine($"      Check internal log files for more information</br>");
-            sb.AppendLine($"    </p>");
-            sb.AppendLine($"  </body>");
-            sb.AppendLine($"</html>");
-
-            await httpContext.Response.WriteAsync(sb.ToString());
-        }
-
         private static async Task GetHealthCheckPageAsync(HttpContext httpContext)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status200OK;
+            // https://docs.microsoft.com/en-us/azure/app-service/monitor-instances-health-check
+            // check the user agent string to ensure this endpoint is secured inside Azure?
 
-            // TODO - Remove all the private information that's included at the moment to make it easier to debug,
-            //        and replace with something more appropriate/informative to public consumers
 
-            var sb = new StringBuilder();
 
-            var featuresConfig = httpContext.RequestServices.GetRequiredService<IOptionsSnapshot<Features>>().Value;
-            var wopiConfig = httpContext.RequestServices.GetRequiredService<IOptionsSnapshot<WopiConfiguration>>().Value;
-            var azureConfig = httpContext.RequestServices.GetRequiredService<IOptionsSnapshot<AzurePlatformConfiguration>>().Value;
-
-            sb.AppendLine($"<!doctype html>");
-            sb.AppendLine($"<html>");
-            sb.AppendLine($"  <body>");
-            sb.AppendLine($"    <p>");
-            sb.AppendLine($"      ======================================================</br>");
-            sb.AppendLine($"      Hello from the CDS FutureNHS File Server PoC at {DateTime.UtcNow}</br>");
-            sb.AppendLine($"      ======================================================</br>");
-            sb.AppendLine($"    </p>");
-            sb.AppendLine($"    <p>");
-            sb.AppendLine($"      <h1>Environment Variables</h1></br>");
-            sb.AppendLine($"      USE_AZURE_APP_CONFIGURATION = {Environment.GetEnvironmentVariable("USE_AZURE_APP_CONFIGURATION")}</br>");
-            sb.AppendLine($"    </p>");
-            sb.AppendLine($"    <p>");
-            sb.AppendLine($"      <h1>Configuration</h1></br>");
-            sb.AppendLine($"      AzurePlatform:AzureAppConfiguration:CacheExpirationIntervalInSeconds = { azureConfig.AzureAppConfiguration?.CacheExpirationIntervalInSeconds }</br>");
-            sb.AppendLine($"      AzurePlatform:AzureAppConfiguration:PrimaryServiceUrl = { azureConfig.AzureAppConfiguration?.PrimaryServiceUrl }</br>");
-            sb.AppendLine($"      AzurePlatform:AzureAppConfiguration:GeoRedundantServiceUrl = { azureConfig.AzureAppConfiguration?.GeoRedundantServiceUrl }</br>");
-            sb.AppendLine($"      <br/>");
-            sb.AppendLine($"      AzurePlatform:AzureBlobStorage:PrimaryServiceUrl = { azureConfig.AzureBlobStorage?.PrimaryServiceUrl }</br>");
-            sb.AppendLine($"      AzurePlatform:AzureBlobStorage:GeoRedundantServiceUrl = { azureConfig.AzureBlobStorage?.GeoRedundantServiceUrl }</br>");
-            sb.AppendLine($"      AzurePlatform:AzureBlobStorage:ContainerName = { azureConfig.AzureBlobStorage?.ContainerName }</br>");
-            sb.AppendLine($"      <br/>");
-            sb.AppendLine($"      AzurePlatform:AzureSql:ReadWriteConnectionString = { azureConfig.AzureSql?.ReadWriteConnectionString }</br>");
-            sb.AppendLine($"      AzurePlatform:AzureSql:ReadOnlyConnectionString = { azureConfig.AzureSql?.ReadOnlyConnectionString }</br>");
-            sb.AppendLine($"      <br/>");
-            sb.AppendLine($"      Wopi:ClientDiscoveryDocumentUrl = { wopiConfig.ClientDiscoveryDocumentUrl }</br>");
-            sb.AppendLine($"      Wopi:HostFilesUrl = { wopiConfig.HostFilesUrl }</br>");
-            sb.AppendLine($"      <br/>");
-            sb.AppendLine($"      Features:AllowFileEdit = { featuresConfig.AllowFileEdit }</br>");
-            sb.AppendLine($"    </p>");
-            sb.AppendLine($"  </body>");
-            sb.AppendLine($"</html>");
-
-            await httpContext.Response.WriteAsync(sb.ToString());
+            //await httpContext.Response.WriteAsync(sb.ToString());
         }
 
         /// <summary>
@@ -248,56 +179,23 @@ namespace FutureNHS.WOPIHost
         {
             var cancellationToken = httpContext.RequestAborted;
 
-            // Try to get the discovery document from the Collabora server.  This tells us what document types are supported, but more importantly
-            // the encrption keys it is using to sign the callback requests it sends to us.  We will use these keys to assure non-reupidation/tampering
-            // If we fail to load this file, we cannot continue to build the page we are return
-
-            //var wopiDiscoveryDocumentFactory = httpContext.RequestServices.GetRequiredService<IWopiDiscoveryDocumentFactory>();
-
-            //var wopiDiscoveryDocument = await wopiDiscoveryDocumentFactory.CreateDocumentAsync(cancellationToken);
-
-            //if (wopiDiscoveryDocument.IsEmpty) throw new ApplicationException("Unable to download the WOPI Discovery Document - remote host is either unavailable or returned non-success status code");  
-
-            // Identify the file that we want to view/edit by inspecting the incoming request for an id.  
-
             var fileId = httpContext.Request.Query["file_id"].FirstOrDefault()?.Trim();
+            var userId = httpContext.Request.Query["user_id"].FirstOrDefault()?.Trim();
 
             const string LATEST_FILE_VERSION = "";
             const string FILENAME_ON_CDSDEV = "E399A9B2-2783-41F0-AC9B-ADA60087FF21";
+            const string USERID_ON_CDSDEV = "EFB2F7F4-8E54-4B01-A634-AD3A00EDC7D6";
 
             if (string.IsNullOrWhiteSpace(fileId)) fileId = File.With(FILENAME_ON_CDSDEV, LATEST_FILE_VERSION); // "DF796179-DB2F-4A06-B4D5-AD7F012CC2CC", "2021-08-09T18:15:02.4214747Z");
-
-            //var wopiConfiguration = httpContext.RequestServices.GetRequiredService<IOptionsSnapshot<WopiConfiguration>>().Value;
-
-            //var hostFilesUrl = wopiConfiguration.HostFilesUrl;
-
-            //if (string.IsNullOrWhiteSpace(hostFilesUrl)) return;
+            if (string.IsNullOrWhiteSpace(userId) || !Guid.TryParse(userId, out _)) userId = USERID_ON_CDSDEV; 
 
             Debug.Assert(fileId is not null);
 
-            //var wopiHostFileEndpointUrl = new Uri(Path.Combine(hostFilesUrl, fileId), UriKind.Absolute);
-
-            //var fileMetadataProvider = httpContext.RequestServices.GetRequiredService<IFileMetadataProvider>();
-
             var file = File.FromId(fileId);
 
-            //if (file.IsEmpty) throw new ApplicationException($"The file_id query parameter '{fileId}' on the request is incorrectly formed.");
+            var authenticatedUser = new AuthenticatedUser(Guid.Parse(userId), "An Example User");
 
-            //var fileMetadata = await fileMetadataProvider.GetForFileAsync(file, cancellationToken);
-
-            //var fileExtension = fileMetadata.Extension;
-
-            //if (string.IsNullOrWhiteSpace(fileExtension)) return;  // TODO - Return appropriate status code to caller
-
-            //var fileAction = "view"; // edit | view | etc (see comments in discoveryDoc.GetEndpointForAsync)
-
-            //var collaboraOnlineEndpoint = wopiDiscoveryDocument.GetEndpointForFileExtension(fileExtension, fileAction, wopiHostFileEndpointUrl);
-
-            //if (collaboraOnlineEndpoint is null || !collaboraOnlineEndpoint.IsAbsoluteUri) return;  // TODO - Return appropriate status code to caller
-
-            var userAuthToken = Guid.NewGuid().ToString();
-
-            var postAuthRequestHandler = PostAuthoriseUserRequestHandler.With(userAuthToken, PostAuthoriseUserRequestHandler.FileAccessPermissions.View, file);
+            var postAuthRequestHandler = AuthoriseUserRequestHandler.With(authenticatedUser, FileAccessPermission.View, file);
 
             var fakeHttpContext = new DefaultHttpContext() { 
                 RequestServices = httpContext.RequestServices,

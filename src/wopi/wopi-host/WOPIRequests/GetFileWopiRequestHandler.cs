@@ -10,18 +10,21 @@ namespace FutureNHS.WOPIHost.WOPIRequests
         : WopiRequestHandler
     {
         private readonly File _file;
+        private readonly AuthenticatedUser _authenticatedUser;
 
-        private GetFileWopiRequestHandler(File file, string accessToken) 
-            : base(accessToken, isWriteAccessRequired: false, demandsProof: true) 
+        private GetFileWopiRequestHandler(AuthenticatedUser authenticatedUser, File file) 
+            : base(true) 
         {
+            if (authenticatedUser is null) throw new ArgumentNullException(nameof(authenticatedUser));
             if (file.IsEmpty) throw new ArgumentNullException(nameof(file));
 
             _file = file;
+            _authenticatedUser = authenticatedUser;
         }
 
-        internal static GetFileWopiRequestHandler With(File file, string accessToken) => new GetFileWopiRequestHandler(file, accessToken);
+        internal static GetFileWopiRequestHandler With(AuthenticatedUser authenticatedUser, File file) => new(authenticatedUser, file);
 
-        protected override async Task HandleAsyncImpl(HttpContext httpContext, CancellationToken cancellationToken)
+        protected override async Task<int> HandleAsyncImpl(HttpContext httpContext, CancellationToken cancellationToken)
         {
             // GET /wopi/files/(file_id)/content 
 
@@ -45,13 +48,12 @@ namespace FutureNHS.WOPIHost.WOPIRequests
             //        that this means for larger files we won't have to reserve enough memory/disk space to hold the complete file
             //        on this server
 
-            var fileMetadataProvider = httpContext.RequestServices.GetRequiredService<IFileMetadataProvider>();
+            var fileMetadataProvider = httpContext.RequestServices.GetRequiredService<IUserFileMetadataProvider>();
 
-            var fileMetadata = await fileMetadataProvider.GetForFileAsync(_file, cancellationToken);
+            var fileMetadata = await fileMetadataProvider.GetForFileAsync(_file, _authenticatedUser, cancellationToken);
 
-            if (fileMetadata.IsEmpty) throw new ApplicationException("The file metadata could not be found for a file that has been located in storage.  Please ensure the file is known to the application, or wait a few minutes for any database synchronisation activities to complete.  Alternatively report the issue to our support team so we can investigate if data has been lost as a result of a recent database restore operation.");
-
-            if (FileStatus.Verified != fileMetadata.FileStatus) throw new ApplicationException($"The status of the file '{fileMetadata.FileStatus}' does not indicate it is safe to be shared with users.");
+            if (fileMetadata is null) return StatusCodes.Status404NotFound;
+            if (!fileMetadata.UserHasViewPermission) return StatusCodes.Status403Forbidden;
 
             await httpResponse.StartAsync(cancellationToken);
 
@@ -60,15 +62,17 @@ namespace FutureNHS.WOPIHost.WOPIRequests
 
             var fileContentMetadataRepository = httpContext.RequestServices.GetRequiredService<IFileContentMetadataRepository>();
 
-            var fileWriteDetails = await fileContentMetadataRepository.GetDetailsAndPutContentIntoStreamAsync(fileMetadata, responseStream, cancellationToken);
+            var fileContentMetadata = await fileContentMetadataRepository.GetDetailsAndPutContentIntoStreamAsync(fileMetadata, responseStream, cancellationToken);
 
-            if (fileWriteDetails.IsEmpty) throw new ApplicationException("Unable to pull the content for the requested file version");
+            if (fileContentMetadata.IsEmpty) throw new ApplicationException("Unable to pull the content for the requested file version");
 
-            if (!string.Equals(fileWriteDetails.Version, _file.Version, StringComparison.OrdinalIgnoreCase)) throw new ApplicationException("The blob store client returned a version of the blob that does not match the version requested");
+            if (!string.Equals(fileContentMetadata.ContentVersion, _file.Version, StringComparison.OrdinalIgnoreCase)) throw new ApplicationException("The blob store client returned a version of the blob that does not match the version requested");
 
             // Done reading, so make sure we are done writing too
 
             await responseStream.FlushAsync(cancellationToken);
+
+            return StatusCodes.Status200OK;
         }
     }
 }
