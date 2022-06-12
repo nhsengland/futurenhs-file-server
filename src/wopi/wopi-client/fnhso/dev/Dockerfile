@@ -1,4 +1,4 @@
-FROM index.dockerhub.io/collabora/code:latest
+FROM collabora/code:latest
 
 ENV domain collaborate-dev\\.future\\.nhs\\.uk
 
