@@ -13,7 +13,7 @@ variables:
   tag: '$(tagVersion)$(Build.BuildId)'
 
   # Agent VM image name
-  vmImageName: 'ubuntu-1604'
+  vmImageName: 'ubuntu-1804'
 
 stages:
 - stage: Build
