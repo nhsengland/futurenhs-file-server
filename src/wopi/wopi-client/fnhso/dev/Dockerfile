@@ -1,4 +1,4 @@
-FROM collabora/code:21.11.3.4.1
+FROM collabora/code:latest
 
 ENV domain collaborate-dev\\.future\\.nhs\\.uk
 
