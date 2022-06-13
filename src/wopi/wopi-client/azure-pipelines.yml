@@ -13,7 +13,7 @@ variables:
   tag: '$(tagVersion)$(Build.BuildId)'
 
   # Agent VM image name
-  vmImageName: 'ubuntu-latest'
+  vmImageName: 'windows-latest'
 
 stages:
 - stage: Build
@@ -32,6 +32,8 @@ stages:
         command: buildAndPush
         repository: $(imageRepository)
         dockerfile: $(dockerfilePath)
+        addPipelineData: false
+        addBaseImageData: false
         containerRegistry: $(dockerRegistryServiceConnection)
         tags: |
           $(tag)
