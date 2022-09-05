@@ -1,4 +1,8 @@
-# FutureNHS - File Server
+# FutureNHS - File Server (NO LONGER ACTIVE)
+
+**This repo is archived and no longer active**
+
+
 This repository contains artifacts pertinent to the build and deployment of a WOPI file server for use of the FutureNHS platform
 
 ## What is FutureNHS?
