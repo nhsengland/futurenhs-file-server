@@ -1,3 +1,6 @@
+# ARCHIVED
+*This project is no longer maintained. Visit https://github.com/nhsengland/futurenhs for the latest on FutureNHS development*
+
 # FutureNHS - File Server (NO LONGER ACTIVE)
 
 **This repo is archived and no longer active**
